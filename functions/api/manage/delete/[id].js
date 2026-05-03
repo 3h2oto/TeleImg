@@ -1,6 +1,25 @@
 import { badRequest, json } from '../../../_lib/http.js';
 import { deleteTelegramMessage } from '../../../_lib/telegram.js';
-import { getRecord } from '../../../_lib/kv.js';
+import { getRecord, normalizeMetadata } from '../../../_lib/kv.js';
+
+async function loadTelegramMetadata(env, key) {
+  const record = await getRecord(env, key);
+  if (!record.metadata) {
+    return null;
+  }
+
+  if (record.metadata.telegram?.chatId && record.metadata.telegram?.messageId) {
+    return record.metadata;
+  }
+
+  const page = await env.img_url.list({ prefix: key, limit: 10 });
+  const exact = (page.keys || []).find((entry) => entry.name === key);
+  if (exact?.metadata) {
+    return normalizeMetadata(key, exact.metadata);
+  }
+
+  return record.metadata;
+}
 
 export async function onRequest(context) {
   if (!context.params?.id) {
@@ -8,16 +27,16 @@ export async function onRequest(context) {
   }
 
   const key = context.params.id;
-  const record = await getRecord(context.env, key);
-  if (!record.metadata) {
+  const metadata = await loadTelegramMetadata(context.env, key);
+  if (!metadata) {
     return json({ error: `Record ${key} was not found.` }, { status: 404 });
   }
 
-  const telegram = record.metadata.telegram;
+  const telegram = metadata.telegram;
   let telegramDeleted = false;
   let warning = '';
 
-  if (telegram?.chatId && telegram?.messageId && context.env.TG_Bot_Token) {
+  if (telegram?.chatId && telegram?.messageId) {
     const result = await deleteTelegramMessage(context.env, telegram.chatId, telegram.messageId);
     if (!result.ok) {
       return json({

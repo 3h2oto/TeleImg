@@ -294,6 +294,21 @@ export function buildTelegramRecordFromUpdate(update, { source = 'telegram-app',
   const key = `${media.file_id}.${extension}`;
   const timestamp = Number.isFinite(carrier.message?.date) ? carrier.message.date * 1000 : Date.now();
 
+  const telegram = {
+    chatId: carrier.message?.chat?.id,
+    chatTitle: carrier.message?.chat?.title || carrier.message?.sender_chat?.title || '',
+    chatType: carrier.message?.chat?.type || '',
+    messageId: carrier.message?.message_id,
+    updateId: update?.update_id,
+    fileId: media.file_id,
+    fileUniqueId: media.file_unique_id,
+    mediaKind: media.kind,
+    mediaGroupId: carrier.message?.media_group_id,
+    date: carrier.message?.date,
+    source: carrier.updateType,
+    viaWebhook
+  };
+
   return {
     key,
     metadata: {
@@ -306,20 +321,19 @@ export function buildTelegramRecordFromUpdate(update, { source = 'telegram-app',
       source,
       caption: carrier.message?.caption || '',
       uploader: buildUploader(carrier.message),
-      telegram: {
-        chatId: carrier.message?.chat?.id,
-        chatTitle: carrier.message?.chat?.title || carrier.message?.sender_chat?.title || '',
-        chatType: carrier.message?.chat?.type || '',
-        messageId: carrier.message?.message_id,
-        updateId: update?.update_id,
-        fileId: media.file_id,
-        fileUniqueId: media.file_unique_id,
-        mediaKind: media.kind,
-        mediaGroupId: carrier.message?.media_group_id,
-        date: carrier.message?.date,
-        source: carrier.updateType,
-        viaWebhook
-      }
+      telegram,
+      telegramChatId: telegram.chatId,
+      telegramChatTitle: telegram.chatTitle,
+      telegramChatType: telegram.chatType,
+      telegramMessageId: telegram.messageId,
+      telegramUpdateId: telegram.updateId,
+      telegramFileId: telegram.fileId,
+      telegramFileUniqueId: telegram.fileUniqueId,
+      telegramMediaKind: telegram.mediaKind,
+      telegramMediaGroupId: telegram.mediaGroupId,
+      telegramDate: telegram.date,
+      telegramSource: telegram.source,
+      telegramViaWebhook: telegram.viaWebhook
     }
   };
 }

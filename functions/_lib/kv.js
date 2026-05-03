@@ -46,24 +46,22 @@ function normalizeUploader(uploader) {
   };
 }
 
-function normalizeTelegramMetadata(telegram) {
-  if (!telegram || typeof telegram !== 'object') {
-    return null;
-  }
+function normalizeTelegramMetadata(telegram, metadata = {}) {
+  const source = telegram && typeof telegram === 'object' ? telegram : {};
 
   const normalized = {
-    chatId: telegram.chatId == null ? '' : String(telegram.chatId),
-    chatTitle: sanitizeText(telegram.chatTitle),
-    chatType: sanitizeText(telegram.chatType),
-    messageId: Number.isFinite(telegram.messageId) ? telegram.messageId : undefined,
-    updateId: Number.isFinite(telegram.updateId) ? telegram.updateId : undefined,
-    fileId: sanitizeText(telegram.fileId),
-    fileUniqueId: sanitizeText(telegram.fileUniqueId),
-    mediaKind: sanitizeText(telegram.mediaKind),
-    mediaGroupId: sanitizeText(telegram.mediaGroupId),
-    date: Number.isFinite(telegram.date) ? telegram.date : undefined,
-    source: sanitizeText(telegram.source),
-    viaWebhook: Boolean(telegram.viaWebhook)
+    chatId: source.chatId != null ? String(source.chatId) : (metadata.telegramChatId != null ? String(metadata.telegramChatId) : ''),
+    chatTitle: sanitizeText(source.chatTitle || metadata.telegramChatTitle),
+    chatType: sanitizeText(source.chatType || metadata.telegramChatType),
+    messageId: Number.isFinite(source.messageId) ? source.messageId : (Number.isFinite(metadata.telegramMessageId) ? metadata.telegramMessageId : undefined),
+    updateId: Number.isFinite(source.updateId) ? source.updateId : (Number.isFinite(metadata.telegramUpdateId) ? metadata.telegramUpdateId : undefined),
+    fileId: sanitizeText(source.fileId || metadata.telegramFileId),
+    fileUniqueId: sanitizeText(source.fileUniqueId || metadata.telegramFileUniqueId),
+    mediaKind: sanitizeText(source.mediaKind || metadata.telegramMediaKind),
+    mediaGroupId: sanitizeText(source.mediaGroupId || metadata.telegramMediaGroupId),
+    date: Number.isFinite(source.date) ? source.date : (Number.isFinite(metadata.telegramDate) ? metadata.telegramDate : undefined),
+    source: sanitizeText(source.source || metadata.telegramSource),
+    viaWebhook: source.viaWebhook !== undefined ? Boolean(source.viaWebhook) : Boolean(metadata.telegramViaWebhook)
   };
 
   if (!normalized.chatId && !normalized.fileId && !normalized.messageId) {
@@ -74,7 +72,7 @@ function normalizeTelegramMetadata(telegram) {
 }
 
 export function normalizeMetadata(key, metadata = {}) {
-  const telegram = normalizeTelegramMetadata(metadata?.telegram);
+  const telegram = normalizeTelegramMetadata(metadata?.telegram, metadata);
   const uploader = normalizeUploader(metadata?.uploader);
   const caption = sanitizeText(metadata?.caption);
   const source = sanitizeText(metadata?.source);

@@ -41,7 +41,7 @@ async function sendToTelegram(formData, apiEndpoint, env, botToken, retryCount =
 
 function buildTelegramInfo(uploadMessage, uploadFile) {
   const media = extractTelegramMedia(uploadMessage);
-  return {
+  const info = {
     chatId: uploadMessage?.chat?.id,
     chatTitle: uploadMessage?.chat?.title || '',
     chatType: uploadMessage?.chat?.type || '',
@@ -54,6 +54,21 @@ function buildTelegramInfo(uploadMessage, uploadFile) {
     source: 'sendMessageResponse',
     viaWebhook: false,
     fileName: uploadFile?.name
+  };
+
+  return {
+    telegram: info,
+    telegramChatId: info.chatId,
+    telegramChatTitle: info.chatTitle,
+    telegramChatType: info.chatType,
+    telegramMessageId: info.messageId,
+    telegramFileId: info.fileId,
+    telegramFileUniqueId: info.fileUniqueId,
+    telegramMediaKind: info.mediaKind,
+    telegramMediaGroupId: info.mediaGroupId,
+    telegramDate: info.date,
+    telegramSource: info.source,
+    telegramViaWebhook: info.viaWebhook
   };
 }
 
@@ -103,7 +118,7 @@ export async function onRequest(context) {
       TimeStamp: Date.now(),
       source: 'web-upload',
       caption: uploadMessage?.caption || '',
-      telegram: buildTelegramInfo(uploadMessage, uploadFile)
+      ...buildTelegramInfo(uploadMessage, uploadFile)
     });
 
     await env.img_url.put(key, '', { metadata });
