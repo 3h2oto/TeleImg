@@ -3,6 +3,7 @@ dist/
 .astro/
 .wrangler/
 data/
+Telegraph-Image/
 .dev.vars
 AGENTS.md
 PROGRESS.*
