@@ -1,4 +1,5 @@
 import { sanitizeFileName } from './kv.js';
+import { getRuntimeConfig } from './runtime-config.js';
 
 const TELEGRAM_PREFIX_RE = /^[A-Za-z0-9_-]{40,}$/;
 const TELEGRAM_ALLOWED_UPDATES = ['message', 'channel_post', 'edited_message', 'edited_channel_post'];
@@ -112,8 +113,26 @@ export function buildLegacyTelegraphUrl(key, search = '') {
   return `https://telegra.ph/file/${encodeURIComponent(key)}${search}`;
 }
 
-export async function callTelegramApi(env, method, params = {}, { useFormData = false } = {}) {
-  const url = `https://api.telegram.org/bot${env.TG_Bot_Token}/${method}`;
+async function resolveTelegramToken(env, explicitToken) {
+  if (explicitToken) {
+    return explicitToken;
+  }
+
+  const config = await getRuntimeConfig(env);
+  return config?.TG_Bot_Token || '';
+}
+
+export async function callTelegramApi(env, method, params = {}, { useFormData = false, token } = {}) {
+  const botToken = await resolveTelegramToken(env, token);
+  if (!botToken) {
+    return {
+      ok: false,
+      status: 503,
+      description: 'TG_Bot_Token is required.'
+    };
+  }
+
+  const url = `https://api.telegram.org/bot${botToken}/${method}`;
   const init = { method: 'POST' };
 
   if (useFormData) {
@@ -151,8 +170,12 @@ export async function getTelegramWebhookInfo(env) {
   return callTelegramApi(env, 'getWebhookInfo', {});
 }
 
-export async function getTelegramMe(env) {
-  return callTelegramApi(env, 'getMe', {});
+export async function getTelegramMe(env, options = {}) {
+  return callTelegramApi(env, 'getMe', {}, options);
+}
+
+export async function getTelegramChat(env, chatId, options = {}) {
+  return callTelegramApi(env, 'getChat', { chat_id: chatId }, options);
 }
 
 export async function getTelegramUpdates(env, { offset, limit = 100, timeout = 0, allowedUpdates = TELEGRAM_ALLOWED_UPDATES } = {}) {

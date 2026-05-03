@@ -1,10 +1,11 @@
 import { json, methodNotAllowed, serviceUnavailable } from './_lib/http.js';
 import { extractUploadedFileId, extractUploadedMessage, extractTelegramMedia, inferExtension, selectUploadEndpoint } from './_lib/telegram.js';
 import { normalizeMetadata, sanitizeFileName } from './_lib/kv.js';
+import { getRuntimeConfig } from './_lib/runtime-config.js';
 
-async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
+async function sendToTelegram(formData, apiEndpoint, env, botToken, retryCount = 0) {
   const maxRetries = 2;
-  const apiUrl = `https://api.telegram.org/bot${env.TG_Bot_Token}/${apiEndpoint}`;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/${apiEndpoint}`;
 
   try {
     const response = await fetch(apiUrl, { method: 'POST', body: formData });
@@ -18,7 +19,7 @@ async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
       const fallback = new FormData();
       fallback.append('chat_id', formData.get('chat_id'));
       fallback.append('document', formData.get('photo'));
-      return sendToTelegram(fallback, 'sendDocument', env, retryCount + 1);
+      return sendToTelegram(fallback, 'sendDocument', env, botToken, retryCount + 1);
     }
 
     return {
@@ -28,7 +29,7 @@ async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
   } catch (error) {
     if (retryCount < maxRetries) {
       await new Promise((resolve) => setTimeout(resolve, 200 * (retryCount + 1)));
-      return sendToTelegram(formData, apiEndpoint, env, retryCount + 1);
+      return sendToTelegram(formData, apiEndpoint, env, botToken, retryCount + 1);
     }
 
     return {
@@ -62,7 +63,8 @@ export async function onRequest(context) {
   }
 
   const { env, request } = context;
-  if (!env.TG_Bot_Token || !env.TG_Chat_ID) {
+  const config = await getRuntimeConfig(env);
+  if (!config.TG_Bot_Token || !config.TG_Chat_ID) {
     return serviceUnavailable('TG_Bot_Token and TG_Chat_ID must be configured before upload can work.');
   }
 
@@ -74,10 +76,10 @@ export async function onRequest(context) {
 
   const [fieldName, endpoint] = selectUploadEndpoint(uploadFile);
   const telegramFormData = new FormData();
-  telegramFormData.append('chat_id', env.TG_Chat_ID);
+  telegramFormData.append('chat_id', config.TG_Chat_ID);
   telegramFormData.append(fieldName, uploadFile, uploadFile.name);
 
-  const result = await sendToTelegram(telegramFormData, endpoint, env);
+  const result = await sendToTelegram(telegramFormData, endpoint, env, config.TG_Bot_Token);
   if (!result.success) {
     return json({ error: result.error }, { status: 502 });
   }

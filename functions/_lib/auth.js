@@ -1,11 +1,8 @@
 import { serviceUnavailable, unauthorized } from './http.js';
+import { getRuntimeConfig } from './runtime-config.js';
 
 export function isDashboardEnabled(env) {
   return Boolean(env?.img_url);
-}
-
-export function isBasicAuthEnabled(env) {
-  return typeof env?.BASIC_USER === 'string' && env.BASIC_USER.length > 0;
 }
 
 export function requireDashboard(env) {
@@ -44,8 +41,14 @@ export function parseBasicAuth(request) {
   }
 }
 
-export function requireBasicAuth(context) {
-  if (!isBasicAuthEnabled(context.env)) {
+export async function isBasicAuthEnabled(env) {
+  const config = await getRuntimeConfig(env);
+  return typeof config?.BASIC_USER === 'string' && config.BASIC_USER.length > 0;
+}
+
+export async function requireBasicAuth(context) {
+  const config = await getRuntimeConfig(context.env);
+  if (typeof config?.BASIC_USER !== 'string' || config.BASIC_USER.length === 0) {
     return null;
   }
 
@@ -54,13 +57,13 @@ export function requireBasicAuth(context) {
     return unauthorized('You need to login.');
   }
 
-  if (parsed.user !== context.env.BASIC_USER || parsed.pass !== context.env.BASIC_PASS) {
+  if (parsed.user !== config.BASIC_USER || parsed.pass !== config.BASIC_PASS) {
     return unauthorized('Invalid credentials.');
   }
 
   return null;
 }
 
-export function requireDashboardAccess(context) {
-  return requireDashboard(context.env) ?? requireBasicAuth(context);
+export async function requireDashboardAccess(context) {
+  return requireDashboard(context.env) ?? await requireBasicAuth(context);
 }

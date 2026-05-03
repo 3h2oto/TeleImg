@@ -6,7 +6,7 @@ export async function onRequest(context) {
     return json({ enabled: false, auth: false, message: 'Dashboard is disabled.' }, { status: 503 });
   }
 
-  if (!isBasicAuthEnabled(context.env)) {
+  if (!await isBasicAuthEnabled(context.env)) {
     return text('Not using basic auth.');
   }
 

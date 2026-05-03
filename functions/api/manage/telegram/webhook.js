@@ -1,9 +1,10 @@
 import { json, methodNotAllowed, serviceUnavailable } from '../../../_lib/http.js';
 import { getTelegramAllowedUpdates, getTelegramWebhookInfo, setTelegramWebhook } from '../../../_lib/telegram.js';
+import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
 
-function resolvePublicOrigin(request, env) {
-  if (env.PUBLIC_BASE_URL) {
-    return env.PUBLIC_BASE_URL;
+function resolvePublicOrigin(request, config) {
+  if (config.PUBLIC_BASE_URL) {
+    return config.PUBLIC_BASE_URL;
   }
 
   const url = new URL(request.url);
@@ -19,18 +20,19 @@ export async function onRequest(context) {
     return methodNotAllowed('POST');
   }
 
-  if (!context.env.TG_Bot_Token) {
+  const config = await getRuntimeConfig(context.env);
+  if (!config.TG_Bot_Token) {
     return serviceUnavailable('TG_Bot_Token is required.');
   }
 
-  const origin = resolvePublicOrigin(context.request, context.env);
+  const origin = resolvePublicOrigin(context.request, config);
   if (!origin) {
     return json({ error: 'Cannot auto-configure Telegram webhook from a local dev origin. Set PUBLIC_BASE_URL or call this endpoint on the deployed site.' }, { status: 400 });
   }
 
   const webhookUrl = new URL('/api/telegram/webhook', origin).toString();
   const result = await setTelegramWebhook(context.env, webhookUrl, {
-    secretToken: context.env.TG_WEBHOOK_SECRET || undefined,
+    secretToken: config.TG_WEBHOOK_SECRET || undefined,
     dropPendingUpdates: false,
     allowedUpdates: getTelegramAllowedUpdates()
   });

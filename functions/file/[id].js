@@ -1,6 +1,7 @@
 import { getOrCreateMetadata } from '../_lib/kv.js';
 import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFilePath } from '../_lib/telegram.js';
 import { redirect, serviceUnavailable } from '../_lib/http.js';
+import { getRuntimeConfig } from '../_lib/runtime-config.js';
 
 function isAdminPreview(request) {
   if (request.headers.get('x-teleimg-admin-preview') === '1') {
@@ -20,8 +21,8 @@ function isAdminPreview(request) {
   }
 }
 
-function isWhitelistModeEnabled(env) {
-  return String(env.WhiteList_Mode).toLowerCase() === 'true';
+function isWhitelistModeEnabled(config) {
+  return String(config.WhiteList_Mode).toLowerCase() === 'true';
 }
 
 function copyForwardHeaders(request) {
@@ -35,29 +36,29 @@ function copyForwardHeaders(request) {
   return forwarded;
 }
 
-async function resolveUpstreamUrl(env, key, search = '') {
+async function resolveUpstreamUrl(config, env, key, search = '') {
   if (!isTelegramFileKey(key)) {
     return buildLegacyTelegraphUrl(key, search);
   }
 
-  if (!env.TG_Bot_Token) {
+  if (!config.TG_Bot_Token) {
     throw serviceUnavailable('TG_Bot_Token is required to serve Telegram-backed files.');
   }
 
-  const filePath = await lookupTelegramFilePath(env, getTelegramFileId(key));
+  const filePath = await lookupTelegramFilePath({ ...env, TG_Bot_Token: config.TG_Bot_Token }, getTelegramFileId(key));
   if (!filePath) {
     return null;
   }
 
-  return `https://api.telegram.org/file/bot${env.TG_Bot_Token}/${filePath}`;
+  return `https://api.telegram.org/file/bot${config.TG_Bot_Token}/${filePath}`;
 }
 
-async function moderateLegacyAsset(env, requestUrl, key, metadata) {
-  if (!env.ModerateContentApiKey || isTelegramFileKey(key) || metadata.Label !== 'None') {
+async function moderateLegacyAsset(config, env, requestUrl, key, metadata) {
+  if (!config.ModerateContentApiKey || isTelegramFileKey(key) || metadata.Label !== 'None') {
     return metadata;
   }
 
-  const moderateUrl = `https://api.moderatecontent.com/moderate/?key=${encodeURIComponent(env.ModerateContentApiKey)}&url=${encodeURIComponent(buildLegacyTelegraphUrl(key, ''))}`;
+  const moderateUrl = `https://api.moderatecontent.com/moderate/?key=${encodeURIComponent(config.ModerateContentApiKey)}&url=${encodeURIComponent(buildLegacyTelegraphUrl(key, ''))}`;
   const response = await fetch(moderateUrl);
   if (!response.ok) {
     return metadata;
@@ -84,12 +85,13 @@ async function moderateLegacyAsset(env, requestUrl, key, metadata) {
 
 export async function onRequest(context) {
   const { request, env, params } = context;
+  const config = await getRuntimeConfig(env);
   const key = params.id;
   const url = new URL(request.url);
 
   let upstreamUrl;
   try {
-    upstreamUrl = await resolveUpstreamUrl(env, key, url.search);
+    upstreamUrl = await resolveUpstreamUrl(config, env, key, url.search);
   } catch (response) {
     if (response instanceof Response) {
       return response;
@@ -132,12 +134,12 @@ export async function onRequest(context) {
     });
   }
 
-  if (isWhitelistModeEnabled(env)) {
+  if (isWhitelistModeEnabled(config)) {
     return redirect(`${url.origin}/whitelist-on`);
   }
 
   try {
-    metadata = await moderateLegacyAsset(env, url, key, metadata);
+    metadata = await moderateLegacyAsset(config, env, url, key, metadata);
   } catch (response) {
     if (response instanceof Response) {
       return response;

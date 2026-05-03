@@ -2,7 +2,7 @@ import { requireDashboardAccess } from './_lib/auth.js';
 import { redirect } from './_lib/http.js';
 
 export async function onRequest(context) {
-  const access = requireDashboardAccess(context);
+  const access = await requireDashboardAccess(context);
   if (access) {
     return access;
   }

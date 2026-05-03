@@ -1,14 +1,16 @@
 import { json, methodNotAllowed, unauthorized } from '../../_lib/http.js';
 import { processTelegramUpdates } from '../../_lib/telegram-sync.js';
+import { getRuntimeConfig } from '../../_lib/runtime-config.js';
 
 export async function onRequest(context) {
   if (context.request.method !== 'POST') {
     return methodNotAllowed('POST');
   }
 
-  if (context.env.TG_WEBHOOK_SECRET) {
+  const config = await getRuntimeConfig(context.env);
+  if (config.TG_WEBHOOK_SECRET) {
     const header = context.request.headers.get('x-telegram-bot-api-secret-token');
-    if (header !== context.env.TG_WEBHOOK_SECRET) {
+    if (header !== config.TG_WEBHOOK_SECRET) {
       return unauthorized('Invalid Telegram webhook secret.', 'Telegram Webhook');
     }
   }
