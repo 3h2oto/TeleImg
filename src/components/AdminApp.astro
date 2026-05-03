@@ -372,6 +372,24 @@
         const response = await fetch(`/api/manage/${endpoint}/${encodeURIComponent(key)}`, { method: 'POST' });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
+          if (action === 'delete') {
+            const reason = payload?.error || '真实删除失败。';
+            const shouldFallback = window.confirm(`${reason}
+
+是否回退为“仅删KV”？`);
+            if (shouldFallback) {
+              const fallbackResponse = await fetch(`/api/manage/deleteKv/${encodeURIComponent(key)}`, { method: 'POST' });
+              const fallbackPayload = await fallbackResponse.json().catch(() => null);
+              if (!fallbackResponse.ok) {
+                setStatus(fallbackPayload?.error || '仅删KV失败。', 'error');
+                return;
+              }
+              setStatus(fallbackPayload?.warning || '已回退为仅删KV。', 'busy');
+              void load({ cursor: state.cursor });
+              return;
+            }
+          }
+
           setStatus(payload?.error || `${action} 失败。`, 'error');
           return;
         }
