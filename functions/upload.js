@@ -1,5 +1,5 @@
 import { json, methodNotAllowed, serviceUnavailable } from './_lib/http.js';
-import { extractUploadedFileId, inferExtension, selectUploadEndpoint } from './_lib/telegram.js';
+import { extractUploadedFileId, extractUploadedMessage, extractTelegramMedia, inferExtension, selectUploadEndpoint } from './_lib/telegram.js';
 import { normalizeMetadata, sanitizeFileName } from './_lib/kv.js';
 
 async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
@@ -38,6 +38,24 @@ async function sendToTelegram(formData, apiEndpoint, env, retryCount = 0) {
   }
 }
 
+function buildTelegramInfo(uploadMessage, uploadFile) {
+  const media = extractTelegramMedia(uploadMessage);
+  return {
+    chatId: uploadMessage?.chat?.id,
+    chatTitle: uploadMessage?.chat?.title || '',
+    chatType: uploadMessage?.chat?.type || '',
+    messageId: uploadMessage?.message_id,
+    fileId: media?.file_id,
+    fileUniqueId: media?.file_unique_id,
+    mediaKind: media?.kind || '',
+    mediaGroupId: uploadMessage?.media_group_id,
+    date: uploadMessage?.date,
+    source: 'sendMessageResponse',
+    viaWebhook: false,
+    fileName: uploadFile?.name
+  };
+}
+
 export async function onRequest(context) {
   if (context.request.method !== 'POST') {
     return methodNotAllowed('POST');
@@ -73,13 +91,17 @@ export async function onRequest(context) {
   const key = `${fileId}.${extension}`;
 
   if (env.img_url) {
+    const uploadMessage = extractUploadedMessage(result.data);
     const metadata = normalizeMetadata(key, {
       fileName: sanitizeFileName(uploadFile.name, key),
       fileSize: uploadFile.size,
       liked: false,
       ListType: 'None',
       Label: 'None',
-      TimeStamp: Date.now()
+      TimeStamp: Date.now(),
+      source: 'web-upload',
+      caption: uploadMessage?.caption || '',
+      telegram: buildTelegramInfo(uploadMessage, uploadFile)
     });
 
     await env.img_url.put(key, '', { metadata });

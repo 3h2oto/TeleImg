@@ -110,3 +110,13 @@ GitHub Actions 会执行：
 - `npm run check`
 - `npm test`
 - `npm run build`
+
+## Telegram 应用内直传
+
+如果要把 Telegram 应用里直接发到群/频道的媒体自动收录进后台，请先部署新版本，然后在 `/admin` 里配置 webhook。
+
+重要限制：
+
+- 对 **群组 / 超级群**，必须先到 **BotFather -> /setprivacy -> Disable** 关闭隐私模式，否则 Telegram 不会把普通用户发的媒体消息推给 bot。
+- 对 **频道**，bot 必须是管理员，这样才能收到 `channel_post` 更新，并且后续才能删除原消息。
+- 对于 bot 从未见过的老历史消息，Telegram Bot API 不能提供完整历史回溯，所以无法凭空重建全部旧记录。

@@ -53,6 +53,7 @@ Optional variables:
 - `BASIC_PASS`
 - `ModerateContentApiKey`
 - `WhiteList_Mode`
+- `TG_WEBHOOK_SECRET`
 
 ### 3. Start Astro-only dev server
 
@@ -112,3 +113,13 @@ GitHub Actions runs:
 - `npm run check`
 - `npm test`
 - `npm run build`
+
+## Telegram direct uploads
+
+To capture media uploaded directly inside Telegram (instead of through the web uploader), deploy the project and then configure the webhook from `/admin`.
+
+Important limitation:
+
+- For **groups / supergroups**, the bot must have Telegram privacy mode disabled via **BotFather -> /setprivacy -> Disable**; otherwise Telegram will not send ordinary user media messages to the bot.
+- For **channels**, the bot must be an admin so it can receive `channel_post` updates and delete messages later.
+- Old historical messages that were never seen by the bot cannot be reconstructed from Telegram full history through the Bot API.
