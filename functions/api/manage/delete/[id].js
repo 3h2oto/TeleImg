@@ -1,7 +1,20 @@
-import { badRequest, json } from '../../../_lib/http.js';
+import { badRequest, json, methodNotAllowed } from '../../../_lib/http.js';
 import { deleteTelegramMessage } from '../../../_lib/telegram.js';
 import { getRecord, normalizeMetadata } from '../../../_lib/kv.js';
 import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
+
+function resolveKey(context) {
+  const raw = context.params?.id;
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
 
 async function loadTelegramMetadata(env, key) {
   const record = await getRecord(env, key);
@@ -23,11 +36,14 @@ async function loadTelegramMetadata(env, key) {
 }
 
 export async function onRequest(context) {
-  if (!context.params?.id) {
-    return badRequest('Missing id.');
+  if (context.request.method !== 'POST' && context.request.method !== 'GET') {
+    return methodNotAllowed(['GET', 'POST']);
   }
 
-  const key = context.params.id;
+  const key = resolveKey(context);
+  if (!key) {
+    return badRequest('Missing id.');
+  }
   const metadata = await loadTelegramMetadata(context.env, key);
   if (!metadata) {
     return json({ error: `Record ${key} was not found.` }, { status: 404 });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[id].js';
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
 import { onRequest as list } from '../functions/api/manage/list.js';
@@ -100,6 +101,28 @@ describe('manage endpoints', () => {
     expect(stored.metadata.telegram.messageId).toBe(7);
   });
 
+
+  it('deletes encoded slash keys via KV-only delete', async () => {
+    const env = {
+      img_url: createKv({
+        'abc/def.txt': {
+          fileName: 'abc/def.txt',
+          TimeStamp: 1
+        }
+      })
+    };
+
+    const response = await deleteKvRecord({
+      env,
+      params: { id: 'abc%2Fdef.txt' },
+      request: new Request('https://example.com/api/manage/deleteKv/abc%2Fdef.txt', { method: 'POST' })
+    });
+
+    const payload = await response.json();
+    expect(payload.kvDeleted).toBe(true);
+    expect(await env.img_url.getWithMetadata('abc/def.txt')).toBeNull();
+  });
+
   it('deletes Telegram message and KV record when metadata exists', async () => {
     const env = {
       TG_Bot_Token: 'token',
@@ -115,7 +138,7 @@ describe('manage endpoints', () => {
     const response = await deleteRecord({
       env,
       params: { id: 'abc.png' },
-      request: new Request('https://example.com/api/manage/delete/abc.png')
+      request: new Request('https://example.com/api/manage/delete/abc.png', { method: 'POST' })
     });
 
     const payload = await response.json();

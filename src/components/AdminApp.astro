@@ -166,6 +166,7 @@
               <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
               <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
               <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
+              <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
             </div>
           </article>
         `;
@@ -354,23 +355,28 @@
           return;
         }
 
+        if (action === 'delete-kv' && !window.confirm(`确认仅删除 ${key} 的 KV 记录？Telegram 原消息将保留。`)) {
+          return;
+        }
+
         const endpoint = {
           like: 'toggleLike',
           white: 'white',
           block: 'block',
-          delete: 'delete'
+          delete: 'delete',
+          'delete-kv': 'deleteKv'
         }[action];
 
         if (!endpoint) return;
 
-        const response = await fetch(`/api/manage/${endpoint}/${encodeURIComponent(key)}`);
+        const response = await fetch(`/api/manage/${endpoint}/${encodeURIComponent(key)}`, { method: 'POST' });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
           setStatus(payload?.error || `${action} 失败。`, 'error');
           return;
         }
 
-        const message = payload?.warning || payload?.message || `${action} 完成。`;
+        const message = payload?.warning || payload?.message || (action === 'delete-kv' ? '仅删 KV 完成。' : `${action} 完成。`);
         setStatus(message, payload?.warning ? 'busy' : 'success');
         void load({ cursor: state.cursor });
       });
