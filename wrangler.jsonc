@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "teleimg",
+  "compatibility_date": "2025-02-28",
+  "pages_build_output_dir": "./dist",
+  "kv_namespaces": [
+    {
+      "binding": "img_url",
+      "id": "fcab249e4842448fbe96475d67174695",
+      "remote": true
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+---
+interface Props {
+  title: string;
+  message: string;
+  actionLabel?: string;
+  actionHref?: string;
+}
+
+const { title, message, actionLabel = '返回首页', actionHref = '/' } = Astro.props;
+---
+
+<section class="hero-shell narrow">
+  <div class="hero-card notice-card">
+    <div class="hero-copy">
+      <span class="eyebrow">TeleImg Notice</span>
+      <h1>{title}</h1>
+      <p>{message}</p>
+      <a class="primary-button link-button" href={actionHref}>{actionLabel}</a>
+    </div>
+  </div>
+</section>

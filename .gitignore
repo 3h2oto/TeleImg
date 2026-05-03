@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+data/
+.dev.vars
+AGENTS.md
+PROGRESS.*
+INCIDENTS.*
+GEMINI.md
+CLAUDE.md

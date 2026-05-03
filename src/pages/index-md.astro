@@ -1,0 +1,12 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import UploadApp from '../components/UploadApp.astro';
+---
+
+<BaseLayout title="TeleImg | Markdown 上传">
+  <UploadApp
+    defaultMarkdown={true}
+    title="TeleImg Markdown Mode"
+    subtitle="默认输出 Markdown 图片链接，适合直接粘贴到文档、Issue 或博客。"
+  />
+</BaseLayout>

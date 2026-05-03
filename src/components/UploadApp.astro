@@ -1,0 +1,186 @@
+---
+interface Props {
+  defaultMarkdown?: boolean;
+  title?: string;
+  subtitle?: string;
+}
+
+const {
+  defaultMarkdown = false,
+  title = 'TeleImg',
+  subtitle = 'Cloudflare Pages + Astro 前端，上传仍由 Telegram Bot API 提供存储。'
+} = Astro.props;
+---
+
+<section class="hero-shell">
+  <div class="hero-card" data-upload-app data-markdown-default={defaultMarkdown ? 'true' : 'false'}>
+    <div class="hero-copy">
+      <span class="eyebrow">Astro on Cloudflare Pages</span>
+      <h1>{title}</h1>
+      <p>{subtitle}</p>
+      <ul class="hero-list">
+        <li>支持拖拽、粘贴、点击选择文件上传</li>
+        <li>上传成功后可一键复制原始链接或 Markdown</li>
+        <li>管理端保留 `/admin.html`、`/admin` 等旧入口</li>
+      </ul>
+    </div>
+
+    <div class="uploader-panel">
+      <label class="dropzone" for="upload-input">
+        <input id="upload-input" name="file" type="file" />
+        <div>
+          <strong>拖拽文件到这里</strong>
+          <span>或点击选择图片 / 视频 / 音频 / 文档</span>
+        </div>
+      </label>
+
+      <div class="toolbar-row">
+        <button type="button" class="ghost-button" data-action="toggle-markdown">切换 Markdown</button>
+        <button type="button" class="ghost-button" data-action="clear">清空</button>
+      </div>
+
+      <p class="status-line" data-role="status">等待上传。</p>
+
+      <div class="result-box" hidden data-role="result-box">
+        <label class="field-label" for="result-url">结果</label>
+        <textarea id="result-url" rows="3" readonly data-role="result"></textarea>
+        <div class="toolbar-row">
+          <button type="button" class="primary-button" data-action="copy">复制结果</button>
+          <a class="ghost-button link-button" data-role="open" href="#" rel="noreferrer" target="_blank">打开文件</a>
+        </div>
+      </div>
+
+      <p class="hint-line">本地联调时，请用 `wrangler pages dev` 提供 KV / env 绑定。真实上传需要配置 `TG_Bot_Token` 与 `TG_Chat_ID`。</p>
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+(() => {
+  const init = () => {
+    document.querySelectorAll('[data-upload-app]').forEach((root) => {
+      if (root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      const fileInput = root.querySelector('#upload-input');
+      const status = root.querySelector('[data-role="status"]');
+      const resultBox = root.querySelector('[data-role="result-box"]');
+      const result = root.querySelector('[data-role="result"]');
+      const openLink = root.querySelector('[data-role="open"]');
+      const markdownDefault = root.dataset.markdownDefault === 'true';
+
+      let currentUrl = '';
+      let useMarkdown = markdownDefault;
+
+      const setStatus = (message, tone = 'idle') => {
+        status.textContent = message;
+        status.dataset.tone = tone;
+      };
+
+      const renderResult = () => {
+        if (!currentUrl) {
+          resultBox.hidden = true;
+          result.value = '';
+          openLink.href = '#';
+          return;
+        }
+
+        const rendered = useMarkdown ? `![](${currentUrl})` : currentUrl;
+        result.value = rendered;
+        openLink.href = currentUrl;
+        resultBox.hidden = false;
+      };
+
+      const clearResult = () => {
+        currentUrl = '';
+        fileInput.value = '';
+        renderResult();
+        setStatus('等待上传。');
+      };
+
+      const upload = async (file) => {
+        if (!file) return;
+        const body = new FormData();
+        body.append('file', file, file.name || 'upload.bin');
+
+        setStatus(`正在上传 ${file.name || '文件'} ...`, 'busy');
+
+        try {
+          const response = await fetch('/upload', {
+            method: 'POST',
+            body
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(payload?.error || '上传失败。');
+          }
+
+          currentUrl = new URL(payload?.[0]?.src || '', window.location.origin).toString();
+          renderResult();
+          setStatus('上传成功。', 'success');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '上传失败。', 'error');
+        }
+      };
+
+      fileInput.addEventListener('change', () => {
+        const [file] = fileInput.files || [];
+        void upload(file);
+      });
+
+      root.querySelector('[data-action="toggle-markdown"]').addEventListener('click', () => {
+        useMarkdown = !useMarkdown;
+        renderResult();
+        setStatus(useMarkdown ? '当前复制 Markdown。' : '当前复制原始链接。');
+      });
+
+      root.querySelector('[data-action="clear"]').addEventListener('click', clearResult);
+
+      root.querySelector('[data-action="copy"]').addEventListener('click', async () => {
+        if (!result.value) return;
+
+        try {
+          await navigator.clipboard.writeText(result.value);
+          setStatus('已复制到剪贴板。', 'success');
+        } catch {
+          result.focus();
+          result.select();
+          setStatus('浏览器阻止了自动复制，请手动复制文本。', 'error');
+        }
+      });
+
+      document.addEventListener('paste', (event) => {
+        const file = [...(event.clipboardData?.files || [])][0];
+        if (file) {
+          void upload(file);
+        }
+      });
+
+      const dropzone = root.querySelector('.dropzone');
+      dropzone.addEventListener('dragover', (event) => {
+        event.preventDefault();
+        dropzone.dataset.dragover = 'true';
+      });
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.dataset.dragover = 'false';
+      });
+      dropzone.addEventListener('drop', (event) => {
+        event.preventDefault();
+        dropzone.dataset.dragover = 'false';
+        const file = [...(event.dataTransfer?.files || [])][0];
+        if (file) {
+          void upload(file);
+        }
+      });
+
+      renderResult();
+    });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>

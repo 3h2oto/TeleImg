@@ -1,0 +1,276 @@
+<section class="admin-shell" data-admin-app>
+  <div class="admin-header">
+    <div>
+      <span class="eyebrow">Dashboard</span>
+      <h1>TeleImg Admin</h1>
+      <p>分页浏览 KV 记录，执行重命名、收藏、白名单、黑名单与删除操作。</p>
+    </div>
+    <div class="toolbar-row admin-actions">
+      <a class="ghost-button link-button" href="/api/manage/logout">重新认证</a>
+      <a class="ghost-button link-button" href="/">返回上传页</a>
+    </div>
+  </div>
+
+  <form class="search-bar" data-role="search-form">
+    <input type="search" name="search" placeholder="按 key 或文件名搜索" autocomplete="off" />
+    <button type="submit" class="primary-button">搜索</button>
+    <button type="button" class="ghost-button" data-action="reset-search">清空</button>
+  </form>
+
+  <div class="toolbar-row admin-actions">
+    <button type="button" class="ghost-button" data-action="refresh">刷新</button>
+    <button type="button" class="ghost-button" data-action="prev">上一页</button>
+    <button type="button" class="ghost-button" data-action="next">下一页</button>
+    <span class="meta-chip" data-role="view-chip">视图：grid</span>
+  </div>
+
+  <p class="status-line" data-role="status">正在加载...</p>
+  <div class="summary-row" data-role="summary"></div>
+  <div class="admin-grid" data-role="grid"></div>
+</section>
+
+<script is:inline>
+(() => {
+  const formatBytes = (value) => {
+    const size = Number(value || 0);
+    if (!size) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let index = 0;
+    let current = size;
+    while (current >= 1024 && index < units.length - 1) {
+      current /= 1024;
+      index += 1;
+    }
+    return `${current.toFixed(current >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+  };
+
+  const formatTime = (value) => {
+    const time = Number(value || 0);
+    if (!time) return '未知时间';
+    return new Intl.DateTimeFormat('zh-CN', {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(new Date(time));
+  };
+
+  const isVideo = (name = '') => /\.(mp4|webm|mov|m4v)$/i.test(name);
+  const isAudio = (name = '') => /\.(mp3|wav|ogg|m4a|flac)$/i.test(name);
+
+  const init = () => {
+    document.querySelectorAll('[data-admin-app]').forEach((root) => {
+      if (root.dataset.bound === 'true') return;
+      root.dataset.bound = 'true';
+
+      const status = root.querySelector('[data-role="status"]');
+      const summary = root.querySelector('[data-role="summary"]');
+      const grid = root.querySelector('[data-role="grid"]');
+      const form = root.querySelector('[data-role="search-form"]');
+      const viewChip = root.querySelector('[data-role="view-chip"]');
+      const locationUrl = new URL(window.location.href);
+      const view = locationUrl.searchParams.get('view') || 'grid';
+      viewChip.textContent = `视图：${view}`;
+      if (view === 'waterfall') {
+        grid.dataset.view = 'waterfall';
+      }
+
+      const state = {
+        cursor: undefined,
+        nextCursor: undefined,
+        history: [],
+        search: locationUrl.searchParams.get('search') || '',
+        currentItems: []
+      };
+
+      form.search.value = state.search;
+
+      const setStatus = (message, tone = 'idle') => {
+        status.textContent = message;
+        status.dataset.tone = tone;
+      };
+
+      const buildCard = (item) => {
+        const badges = [item.metadata?.ListType, item.metadata?.Label, item.metadata?.liked ? 'liked' : null]
+          .filter((value) => value && value !== 'None')
+          .map((value) => `<span class="badge">${value}</span>`)
+          .join('');
+
+        const preview = isVideo(item.name)
+          ? `<video controls preload="metadata" src="${item.url}"></video>`
+          : isAudio(item.name)
+            ? `<div class="audio-card"><span>🎵</span><a href="${item.url}" target="_blank" rel="noreferrer">播放 / 打开</a></div>`
+            : `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.name}" />`;
+
+        return `
+          <article class="media-card" data-key="${item.name}">
+            <div class="preview-frame">${preview}</div>
+            <div class="media-copy">
+              <strong title="${item.metadata?.fileName || item.name}">${item.metadata?.fileName || item.name}</strong>
+              <p class="muted-text">${item.name}</p>
+              <div class="badge-row">${badges || '<span class="badge muted">None</span>'}</div>
+              <dl>
+                <div><dt>时间</dt><dd>${formatTime(item.metadata?.TimeStamp)}</dd></div>
+                <div><dt>大小</dt><dd>${formatBytes(item.metadata?.fileSize)}</dd></div>
+              </dl>
+            </div>
+            <div class="toolbar-row compact">
+              <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
+              <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
+              <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
+              <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
+              <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
+              <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">删除</button>
+            </div>
+          </article>
+        `;
+      };
+
+      const updateSummary = (payload) => {
+        const parts = [
+          `当前记录：${payload.keys.length}`,
+          `下一页游标：${payload.cursor || '无'}`,
+          payload.scanned ? `扫描数：${payload.scanned}` : null,
+          payload.list_complete ? '已到末页' : '还有更多结果'
+        ].filter(Boolean);
+        summary.innerHTML = parts.map((part) => `<span class="meta-chip">${part}</span>`).join('');
+      };
+
+      const render = (payload) => {
+        state.currentItems = payload.keys || [];
+        grid.innerHTML = state.currentItems.length
+          ? state.currentItems.map(buildCard).join('')
+          : '<div class="empty-state">没有找到任何记录。</div>';
+        state.nextCursor = payload.cursor;
+        updateSummary(payload);
+      };
+
+      const load = async ({ cursor, pushHistory = false } = {}) => {
+        const query = new URLSearchParams({ limit: '40' });
+        if (cursor) query.set('cursor', cursor);
+        if (state.search) query.set('search', state.search);
+        if (pushHistory && state.cursor) state.history.push(state.cursor);
+        state.cursor = cursor;
+        setStatus('正在加载...', 'busy');
+
+        try {
+          const response = await fetch(`/api/manage/list?${query.toString()}`, {
+            headers: { accept: 'application/json' }
+          });
+
+          if (response.status === 401) {
+            window.location.href = '/api/manage/login';
+            return;
+          }
+
+          const payload = await response.json().catch(() => ({ error: '无法解析返回内容。' }));
+          if (!response.ok) {
+            throw new Error(payload?.error || '加载失败。');
+          }
+
+          render(payload);
+          setStatus('加载完成。', 'success');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '加载失败。', 'error');
+          grid.innerHTML = '<div class="empty-state">加载失败，请检查 KV 绑定或认证状态。</div>';
+        }
+      };
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        state.search = form.search.value.trim();
+        state.history = [];
+        const nextUrl = new URL(window.location.href);
+        if (state.search) {
+          nextUrl.searchParams.set('search', state.search);
+        } else {
+          nextUrl.searchParams.delete('search');
+        }
+        history.replaceState({}, '', nextUrl);
+        void load({ cursor: undefined });
+      });
+
+      root.querySelector('[data-action="reset-search"]').addEventListener('click', () => {
+        form.reset();
+        state.search = '';
+        state.history = [];
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.delete('search');
+        history.replaceState({}, '', nextUrl);
+        void load({ cursor: undefined });
+      });
+
+      root.querySelector('[data-action="refresh"]').addEventListener('click', () => void load({ cursor: state.cursor }));
+      root.querySelector('[data-action="next"]').addEventListener('click', () => {
+        if (state.nextCursor) {
+          void load({ cursor: state.nextCursor, pushHistory: true });
+        }
+      });
+      root.querySelector('[data-action="prev"]').addEventListener('click', () => {
+        const previous = state.history.pop();
+        void load({ cursor: previous });
+      });
+
+      grid.addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+
+        const action = button.dataset.action;
+        const key = button.dataset.key;
+        const origin = window.location.origin;
+
+        if (action === 'copy') {
+          const text = `${origin}/file/${key}`;
+          await navigator.clipboard.writeText(text);
+          setStatus(`已复制 ${key}。`, 'success');
+          return;
+        }
+
+        if (action === 'rename') {
+          const current = state.currentItems.find((item) => item.name === key);
+          const nextName = window.prompt('新的文件名', current?.metadata?.fileName || key);
+          if (!nextName) return;
+          const response = await fetch(`/api/manage/editName/${encodeURIComponent(key)}?newName=${encodeURIComponent(nextName)}`);
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            setStatus(payload?.error || '重命名失败。', 'error');
+            return;
+          }
+          setStatus('文件名已更新。', 'success');
+          void load({ cursor: state.cursor });
+          return;
+        }
+
+        if (action === 'delete' && !window.confirm(`确认删除 ${key} 的 KV 记录吗？`)) {
+          return;
+        }
+
+        const endpoint = {
+          like: 'toggleLike',
+          white: 'white',
+          block: 'block',
+          delete: 'delete'
+        }[action];
+
+        if (!endpoint) return;
+
+        const response = await fetch(`/api/manage/${endpoint}/${encodeURIComponent(key)}`);
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          setStatus(payload?.error || `${action} 失败。`, 'error');
+          return;
+        }
+
+        setStatus(`${action} 完成。`, 'success');
+        void load({ cursor: state.cursor });
+      });
+
+      void load({ cursor: undefined });
+    });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>
