@@ -166,8 +166,8 @@ export async function lookupTelegramFilePath(env, fileId) {
   return result.ok ? result.result?.file_path ?? null : null;
 }
 
-export async function getTelegramWebhookInfo(env) {
-  return callTelegramApi(env, 'getWebhookInfo', {});
+export async function getTelegramWebhookInfo(env, options = {}) {
+  return callTelegramApi(env, 'getWebhookInfo', {}, options);
 }
 
 export async function getTelegramMe(env, options = {}) {
@@ -178,35 +178,35 @@ export async function getTelegramChat(env, chatId, options = {}) {
   return callTelegramApi(env, 'getChat', { chat_id: chatId }, options);
 }
 
-export async function getTelegramUpdates(env, { offset, limit = 100, timeout = 0, allowedUpdates = TELEGRAM_ALLOWED_UPDATES } = {}) {
+export async function getTelegramUpdates(env, { offset, limit = 100, timeout = 0, allowedUpdates = TELEGRAM_ALLOWED_UPDATES, token } = {}) {
   return callTelegramApi(env, 'getUpdates', {
     offset,
     limit,
     timeout,
     allowed_updates: allowedUpdates
-  });
+  }, { token });
 }
 
-export async function setTelegramWebhook(env, webhookUrl, { secretToken, dropPendingUpdates = false, allowedUpdates = TELEGRAM_ALLOWED_UPDATES } = {}) {
+export async function setTelegramWebhook(env, webhookUrl, { secretToken, dropPendingUpdates = false, allowedUpdates = TELEGRAM_ALLOWED_UPDATES, token } = {}) {
   return callTelegramApi(env, 'setWebhook', {
     url: webhookUrl,
     secret_token: secretToken,
     drop_pending_updates: dropPendingUpdates,
     allowed_updates: allowedUpdates
-  });
+  }, { token });
 }
 
-export async function deleteTelegramWebhook(env, { dropPendingUpdates = false } = {}) {
+export async function deleteTelegramWebhook(env, { dropPendingUpdates = false, token } = {}) {
   return callTelegramApi(env, 'deleteWebhook', {
     drop_pending_updates: dropPendingUpdates
-  });
+  }, { token });
 }
 
-export async function deleteTelegramMessage(env, chatId, messageId) {
+export async function deleteTelegramMessage(env, chatId, messageId, options = {}) {
   return callTelegramApi(env, 'deleteMessage', {
     chat_id: chatId,
     message_id: messageId
-  });
+  }, options);
 }
 
 export function getTelegramFileId(key) {

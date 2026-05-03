@@ -32,6 +32,7 @@ export async function onRequest(context) {
 
   const webhookUrl = new URL('/api/telegram/webhook', origin).toString();
   const result = await setTelegramWebhook(context.env, webhookUrl, {
+    token: config.TG_Bot_Token,
     secretToken: config.TG_WEBHOOK_SECRET || undefined,
     dropPendingUpdates: false,
     allowedUpdates: getTelegramAllowedUpdates()
@@ -41,7 +42,7 @@ export async function onRequest(context) {
     return json({ error: result.description, webhookUrl }, { status: 502 });
   }
 
-  const info = await getTelegramWebhookInfo(context.env);
+  const info = await getTelegramWebhookInfo(context.env, { token: config.TG_Bot_Token });
   return json({
     success: true,
     webhookUrl,

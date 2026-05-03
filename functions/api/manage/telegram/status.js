@@ -1,15 +1,17 @@
 import { json, serviceUnavailable } from '../../../_lib/http.js';
 import { getTelegramMe, getTelegramWebhookInfo } from '../../../_lib/telegram.js';
 import { getTelegramSyncState } from '../../../_lib/telegram-sync.js';
+import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
 
 export async function onRequest(context) {
-  if (!context.env.TG_Bot_Token) {
+  const config = await getRuntimeConfig(context.env);
+  if (!config.TG_Bot_Token) {
     return serviceUnavailable('TG_Bot_Token is required.');
   }
 
   const [me, webhook, syncState] = await Promise.all([
-    getTelegramMe(context.env),
-    getTelegramWebhookInfo(context.env),
+    getTelegramMe(context.env, { token: config.TG_Bot_Token }),
+    getTelegramWebhookInfo(context.env, { token: config.TG_Bot_Token }),
     getTelegramSyncState(context.env)
   ]);
 

@@ -1,13 +1,15 @@
 import { json, methodNotAllowed, serviceUnavailable } from '../../../_lib/http.js';
 import { getTelegramAllowedUpdates, getTelegramUpdates } from '../../../_lib/telegram.js';
 import { getTelegramSyncState, processTelegramUpdates } from '../../../_lib/telegram-sync.js';
+import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
 
 export async function onRequest(context) {
   if (context.request.method !== 'POST') {
     return methodNotAllowed('POST');
   }
 
-  if (!context.env.TG_Bot_Token) {
+  const config = await getRuntimeConfig(context.env);
+  if (!config.TG_Bot_Token) {
     return serviceUnavailable('TG_Bot_Token is required.');
   }
 
@@ -21,6 +23,7 @@ export async function onRequest(context) {
     offset,
     limit,
     timeout: 0,
+    token: config.TG_Bot_Token,
     allowedUpdates: getTelegramAllowedUpdates()
   });
 

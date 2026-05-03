@@ -1,6 +1,7 @@
 import { badRequest, json } from '../../../_lib/http.js';
 import { deleteTelegramMessage } from '../../../_lib/telegram.js';
 import { getRecord, normalizeMetadata } from '../../../_lib/kv.js';
+import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
 
 async function loadTelegramMetadata(env, key) {
   const record = await getRecord(env, key);
@@ -32,12 +33,13 @@ export async function onRequest(context) {
     return json({ error: `Record ${key} was not found.` }, { status: 404 });
   }
 
+  const config = await getRuntimeConfig(context.env);
   const telegram = metadata.telegram;
   let telegramDeleted = false;
   let warning = '';
 
   if (telegram?.chatId && telegram?.messageId) {
-    const result = await deleteTelegramMessage(context.env, telegram.chatId, telegram.messageId);
+    const result = await deleteTelegramMessage(context.env, telegram.chatId, telegram.messageId, { token: config.TG_Bot_Token });
     if (!result.ok) {
       return json({
         error: `Failed to delete Telegram message ${telegram.messageId}: ${result.description}`,
