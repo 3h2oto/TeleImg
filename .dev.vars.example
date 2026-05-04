@@ -5,3 +5,5 @@ WhiteList_Mode=false
 BASIC_USER=admin
 BASIC_PASS=123
 TG_WEBHOOK_SECRET=replace_with_random_secret
+TG_MT_BRIDGE_URL=
+TG_MT_BRIDGE_SECRET=

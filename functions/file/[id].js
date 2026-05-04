@@ -1,4 +1,5 @@
 import { getOrCreateMetadata } from '../_lib/kv.js';
+import { buildMtprotoBridgeRedirect, isTelegramLargeFileError } from '../_lib/mtproto-bridge.js';
 import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFile } from '../_lib/telegram.js';
 import { redirect, serviceUnavailable, text } from '../_lib/http.js';
 import { getRuntimeConfig } from '../_lib/runtime-config.js';
@@ -36,7 +37,7 @@ function copyForwardHeaders(request) {
   return forwarded;
 }
 
-async function resolveUpstreamUrl(config, env, key, search = '') {
+async function resolveUpstreamUrl(config, env, key, metadata, search = '') {
   if (!isTelegramFileKey(key)) {
     return { ok: true, upstreamUrl: buildLegacyTelegraphUrl(key, search) };
   }
@@ -47,11 +48,21 @@ async function resolveUpstreamUrl(config, env, key, search = '') {
 
   const lookup = await lookupTelegramFile({ ...env, TG_Bot_Token: config.TG_Bot_Token }, getTelegramFileId(key));
   if (!lookup.ok) {
+    if (isTelegramLargeFileError(lookup.description)) {
+      const bridgeUrl = await buildMtprotoBridgeRedirect(config, key, metadata);
+      if (bridgeUrl) {
+        return {
+          ok: true,
+          redirectUrl: bridgeUrl
+        };
+      }
+    }
+
     return {
       ok: false,
-      status: lookup.description?.toLowerCase().includes('file is too big') ? 413 : 502,
-      message: lookup.description?.toLowerCase().includes('file is too big')
-        ? 'Telegram Bot API cannot serve this file because Telegram reported it is too big for bot download. The admin can show its metadata, but serving the binary requires external storage or a user-session/MTProto based fetch path.'
+      status: isTelegramLargeFileError(lookup.description) ? 413 : 502,
+      message: isTelegramLargeFileError(lookup.description)
+        ? 'Telegram Bot API cannot serve this file because Telegram reported it is too big for bot download, and no MTProto bridge is configured for fallback delivery.'
         : `Telegram getFile failed: ${lookup.description || 'unknown error'}.`,
       telegramError: lookup.description || 'unknown error'
     };
@@ -117,13 +128,44 @@ export async function onRequest(context) {
   const config = await getRuntimeConfig(env);
   const key = params.id;
   const url = new URL(request.url);
+  const adminPreview = isAdminPreview(request);
+  let metadata = env.img_url ? await getOrCreateMetadata(env, key) : null;
+
+  if (!adminPreview && metadata) {
+    if (metadata.ListType === 'Block' || metadata.Label === 'adult') {
+      return redirect(`${url.origin}/block-img`);
+    }
+
+    const isWhiteListed = metadata.ListType === 'White';
+    if (!isWhiteListed && isWhitelistModeEnabled(config)) {
+      return redirect(`${url.origin}/whitelist-on`);
+    }
+
+    if (!isWhiteListed) {
+      try {
+        metadata = await moderateLegacyAsset(config, env, url, key, metadata);
+      } catch (response) {
+        if (response instanceof Response) {
+          return response;
+        }
+        throw response;
+      }
+
+      await env.img_url.put(key, '', { metadata });
+    }
+  }
 
   let upstreamUrl;
   try {
-    const resolution = await resolveUpstreamUrl(config, env, key, url.search);
+    const resolution = await resolveUpstreamUrl(config, env, key, metadata, url.search);
     if (!resolution.ok) {
       return telegramFailureResponse(key, resolution);
     }
+
+    if (resolution.redirectUrl) {
+      return redirect(resolution.redirectUrl, 302, { 'cache-control': 'no-store' });
+    }
+
     upstreamUrl = resolution.upstreamUrl;
   } catch (response) {
     if (response instanceof Response) {
@@ -141,42 +183,13 @@ export async function onRequest(context) {
     return upstreamResponse;
   }
 
-  if (isAdminPreview(request) || !env.img_url) {
+  if (adminPreview || !env.img_url) {
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
       headers: upstreamResponse.headers
     });
   }
-
-  let metadata = await getOrCreateMetadata(env, key);
-
-  if (metadata.ListType === 'Block' || metadata.Label === 'adult') {
-    return redirect(`${url.origin}/block-img`);
-  }
-
-  if (metadata.ListType === 'White') {
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      statusText: upstreamResponse.statusText,
-      headers: upstreamResponse.headers
-    });
-  }
-
-  if (isWhitelistModeEnabled(config)) {
-    return redirect(`${url.origin}/whitelist-on`);
-  }
-
-  try {
-    metadata = await moderateLegacyAsset(config, env, url, key, metadata);
-  } catch (response) {
-    if (response instanceof Response) {
-      return response;
-    }
-    throw response;
-  }
-
-  await env.img_url.put(key, '', { metadata });
 
   return new Response(upstreamResponse.body, {
     status: upstreamResponse.status,

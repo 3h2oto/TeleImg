@@ -7,6 +7,8 @@ const RUNTIME_KEYS = [
   'TG_Bot_Token',
   'TG_Chat_ID',
   'TG_WEBHOOK_SECRET',
+  'TG_MT_BRIDGE_URL',
+  'TG_MT_BRIDGE_SECRET',
   'PUBLIC_BASE_URL',
   'WhiteList_Mode',
   'ModerateContentApiKey'

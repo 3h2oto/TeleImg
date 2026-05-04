@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { onRequest } from '../functions/file/[id].js';
+import { verifyMtprotoBridgePayload } from '../shared/mtproto-bridge.js';
 import { createKv } from './helpers.js';
 
 const originalFetch = global.fetch;
@@ -119,6 +120,73 @@ describe('/file/[id]', () => {
     expect(response.status).toBe(413);
     const body = await response.text();
     expect(body).toContain('Telegram Bot API cannot serve this file');
+    expect(body).toContain('no MTProto bridge is configured');
     expect(body).toContain('file is too big');
+  });
+
+  it('redirects large Telegram files to the signed MTProto bridge when configured', async () => {
+    const key = 'BAACAgEAAyEFAASOZ3wkAAMjafhWhh_XrMSN9CJ6p8Wk3VTLnCQAAgYGAAJ3jsFHJ97vQKEUt7g7BA.mp4';
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/bottoken/getFile')) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: file is too big'
+        }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      throw new Error(`unexpected upstream fetch: ${url}`);
+    });
+
+    const env = {
+      TG_Bot_Token: 'token',
+      TG_MT_BRIDGE_URL: 'https://bridge.example.com/base/',
+      TG_MT_BRIDGE_SECRET: 'secret',
+      img_url: createKv({
+        [key]: {
+          TimeStamp: 1,
+          fileName: 'big-video.mp4',
+          fileSize: 665750777,
+          source: 'telegram-app',
+          telegram: {
+            chatId: '-10001',
+            messageId: 35,
+            fileId: key.replace(/\.mp4$/, '')
+          }
+        }
+      })
+    };
+
+    const response = await onRequest({
+      env,
+      params: { id: key },
+      request: new Request(`https://teleimg.example/file/${key}`)
+    });
+
+    expect(response.status).toBe(302);
+    const location = response.headers.get('location');
+    expect(location).toBeTruthy();
+    const redirectUrl = new URL(location);
+    expect(redirectUrl.origin).toBe('https://bridge.example.com');
+    expect(redirectUrl.pathname).toBe('/telegram/file');
+    expect(redirectUrl.searchParams.get('chatId')).toBe('-10001');
+    expect(redirectUrl.searchParams.get('messageId')).toBe('35');
+    expect(redirectUrl.searchParams.get('key')).toBe(key);
+    expect(redirectUrl.searchParams.get('name')).toBe('big-video.mp4');
+    expect(redirectUrl.searchParams.get('sig')).toBeTruthy();
+
+    const verified = await verifyMtprotoBridgePayload('secret', {
+      chatId: redirectUrl.searchParams.get('chatId'),
+      messageId: redirectUrl.searchParams.get('messageId'),
+      key: redirectUrl.searchParams.get('key'),
+      name: redirectUrl.searchParams.get('name'),
+      expires: redirectUrl.searchParams.get('expires')
+    }, redirectUrl.searchParams.get('sig'));
+
+    expect(verified).toBe(true);
   });
 });

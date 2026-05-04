@@ -51,6 +51,9 @@ cp .dev.vars.example .dev.vars
 - `BASIC_PASS`
 - `ModerateContentApiKey`
 - `WhiteList_Mode`
+- `TG_WEBHOOK_SECRET`
+- `TG_MT_BRIDGE_URL`
+- `TG_MT_BRIDGE_SECRET`
 
 ### 3. 仅启动 Astro 前端
 
@@ -120,3 +123,57 @@ GitHub Actions 会执行：
 - 对 **群组 / 超级群**，必须先到 **BotFather -> /setprivacy -> Disable** 关闭隐私模式，否则 Telegram 不会把普通用户发的媒体消息推给 bot。
 - 对 **频道**，bot 必须是管理员，这样才能收到 `channel_post` 更新，并且后续才能删除原消息。
 - 对于 bot 从未见过的老历史消息，Telegram Bot API 不能提供完整历史回溯，所以无法凭空重建全部旧记录。
+
+## 大文件的 MTProto 回退下载
+
+Telegram Bot API 对超大媒体会直接返回 `Bad Request: file is too big`。现在这个项目支持一个可选的 **MTProto bridge**：当 `/file/:id` 遇到这类 Telegram 应用内直传大文件时，会改为跳转到一个带签名的 Telegram 用户会话下载链路。
+
+### 职责划分
+
+- **Cloudflare Pages**：继续负责普通上传、后台、Bot API 文件访问。
+- **独立 Node.js MTProto bridge**：专门负责超大媒体的 Telegram 用户态下载。
+
+这不是绕弯子，这是把有状态的 Telegram 用户登录放到该放的地方，别把 Pages Functions 搞成一团泥。
+
+### 1. 先生成 Telegram 用户会话
+
+先到 `https://my.telegram.org` 创建你自己的 Telegram API ID / Hash，然后执行：
+
+```bash
+TG_USER_API_ID=123456 \
+TG_USER_API_HASH=your_hash \
+npm run mtproto:login
+```
+
+把输出的 `TG_USER_SESSION=...` 保存好，**不要提交进仓库**。
+
+### 2. 启动 MTProto bridge
+
+在你自己控制的机器上运行：
+
+```bash
+TG_USER_API_ID=123456 \
+TG_USER_API_HASH=your_hash \
+TG_USER_SESSION=your_saved_session \
+TG_MT_BRIDGE_SECRET=replace_with_long_random_secret \
+TG_MT_BRIDGE_PORT=8788 \
+npm run mtproto:bridge
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8788/healthz
+```
+
+### 3. 让 Pages 指向 bridge
+
+在 Cloudflare Pages 环境变量里增加：
+
+- `TG_MT_BRIDGE_URL=https://your-bridge.example.com`
+- `TG_MT_BRIDGE_SECRET=replace_with_long_random_secret`
+
+之后行为会变成：
+
+- `getFile` 正常：继续走原来的 Bot API 文件链路。
+- `getFile` 返回 `file is too big`：改走短时效签名的 MTProto bridge 下载链路。

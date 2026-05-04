@@ -12,18 +12,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci": "npm run check && npm run test && npm run build",
-    "cf:whoami": "wrangler whoami"
+    "cf:whoami": "wrangler whoami",
+    "mtproto:login": "node scripts/telegram-mtproto-login.mjs",
+    "mtproto:bridge": "node scripts/telegram-mtproto-bridge.mjs"
   },
   "dependencies": {
-    "astro": "^6.2.1"
+    "astro": "^6.2.1",
+    "input": "^1.0.1",
+    "telegram": "^2.26.22"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@types/node": "^24.10.1",
+    "node-addon-api": "^8.7.0",
+    "node-gyp": "^12.3.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5",
-    "wrangler": "^4.87.0",
-    "node-addon-api": "^8.7.0",
-    "node-gyp": "^12.3.0"
+    "wrangler": "^4.87.0"
   }
 }

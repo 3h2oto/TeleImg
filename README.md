@@ -54,6 +54,8 @@ Optional variables:
 - `ModerateContentApiKey`
 - `WhiteList_Mode`
 - `TG_WEBHOOK_SECRET`
+- `TG_MT_BRIDGE_URL`
+- `TG_MT_BRIDGE_SECRET`
 
 ### 3. Start Astro-only dev server
 
@@ -123,3 +125,55 @@ Important limitation:
 - For **groups / supergroups**, the bot must have Telegram privacy mode disabled via **BotFather -> /setprivacy -> Disable**; otherwise Telegram will not send ordinary user media messages to the bot.
 - For **channels**, the bot must be an admin so it can receive `channel_post` updates and delete messages later.
 - Old historical messages that were never seen by the bot cannot be reconstructed from Telegram full history through the Bot API.
+
+## MTProto fallback for oversized Telegram files
+
+Telegram Bot API may reject large media with `Bad Request: file is too big`. This project now supports an optional **MTProto bridge** so `/file/:id` can redirect oversized Telegram-app uploads to a signed user-session download path.
+
+### What runs where
+
+- **Cloudflare Pages** keeps handling normal uploads, admin, and Bot API file delivery.
+- A separate **Node.js MTProto bridge** handles oversized media through a Telegram **user session**.
+
+This split is deliberate: it keeps the Pages app simple and pushes the stateful Telegram user login to a service that is actually meant to hold that session.
+
+### 1. Create a Telegram user session
+
+First create your own Telegram API credentials at `https://my.telegram.org`, then run:
+
+```bash
+TG_USER_API_ID=123456 \
+TG_USER_API_HASH=your_hash \
+npm run mtproto:login
+```
+
+Save the printed `TG_USER_SESSION=...` value. Do **not** commit it.
+
+### 2. Run the MTProto bridge
+
+On a machine you control:
+
+```bash
+TG_USER_API_ID=123456 \
+TG_USER_API_HASH=your_hash \
+TG_USER_SESSION=your_saved_session \
+TG_MT_BRIDGE_SECRET=replace_with_long_random_secret \
+TG_MT_BRIDGE_PORT=8788 \
+npm run mtproto:bridge
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8788/healthz
+```
+
+### 3. Point Pages to the bridge
+
+Set these two variables in Cloudflare Pages:
+
+- `TG_MT_BRIDGE_URL=https://your-bridge.example.com`
+- `TG_MT_BRIDGE_SECRET=replace_with_long_random_secret`
+
+When Bot API `getFile` works, TeleImg still uses the normal bot file path.
+When Bot API says `file is too big`, TeleImg now issues a short-lived signed redirect to the bridge.
