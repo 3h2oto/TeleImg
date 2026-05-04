@@ -10,3 +10,6 @@ PROGRESS.*
 INCIDENTS.*
 GEMINI.md
 CLAUDE.md
+
+mtproto-bridge-rs/target/
+teleimg-user.session

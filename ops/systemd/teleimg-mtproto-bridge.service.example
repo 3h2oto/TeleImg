@@ -1,0 +1,23 @@
+[Unit]
+Description=TeleImg Rust MTProto Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teleimg
+Group=teleimg
+WorkingDirectory=/var/lib/teleimg
+EnvironmentFile=/etc/teleimg/mtproto-bridge.env
+ExecStart=/usr/local/bin/teleimg-mtproto-bridge
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/teleimg
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

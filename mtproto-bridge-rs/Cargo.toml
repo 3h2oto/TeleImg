@@ -1,0 +1,37 @@
+[package]
+name = "teleimg-mtproto-bridge"
+version = "0.1.0"
+edition = "2024"
+description = "Rust MTProto bridge for oversized Telegram media in TeleImg"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "teleimg-mtproto-bridge"
+path = "src/bin/teleimg-mtproto-bridge.rs"
+
+[[bin]]
+name = "teleimg-mtproto-login"
+path = "src/bin/teleimg-mtproto-login.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+axum = "0.8.9"
+base64 = "0.22.1"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+grammers-client = "0.9.0"
+grammers-mtsender = "0.9.0"
+grammers-session = "0.9.0"
+grammers-tl-types = "0.9.0"
+hmac = "0.13.0"
+mime_guess = "2.0.5"
+percent-encoding = "2.3.2"
+rpassword = "7.5.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.11.0"
+tempfile = "3.27.0"
+tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread", "signal", "fs", "net", "sync"] }
+tokio-util = { version = "0.7.18", features = ["io"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

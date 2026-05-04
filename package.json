@@ -13,13 +13,11 @@
     "test:watch": "vitest",
     "ci": "npm run check && npm run test && npm run build",
     "cf:whoami": "wrangler whoami",
-    "mtproto:login": "node scripts/telegram-mtproto-login.mjs",
-    "mtproto:bridge": "node scripts/telegram-mtproto-bridge.mjs"
+    "mtproto:login": "cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-login --",
+    "mtproto:bridge": "cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-bridge --"
   },
   "dependencies": {
-    "astro": "^6.2.1",
-    "input": "^1.0.1",
-    "telegram": "^2.26.22"
+    "astro": "^6.2.1"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",

@@ -128,38 +128,53 @@ Important limitation:
 
 ## MTProto fallback for oversized Telegram files
 
-Telegram Bot API may reject large media with `Bad Request: file is too big`. This project now supports an optional **MTProto bridge** so `/file/:id` can redirect oversized Telegram-app uploads to a signed user-session download path.
+Telegram Bot API may reject large media with `Bad Request: file is too big`. This project now supports an optional **Rust MTProto bridge** so `/file/:id` can redirect oversized Telegram-app uploads to a signed user-session download path.
 
 ### What runs where
 
-- **Cloudflare Pages** keeps handling normal uploads, admin, and Bot API file delivery.
-- A separate **Node.js MTProto bridge** handles oversized media through a Telegram **user session**.
+- **Cloudflare Pages** keeps handling normal uploads, admin, signing, and Bot API file delivery.
+- A separate **Rust MTProto bridge** on your VPS validates the short-lived signature and downloads the file through a Telegram **user session**.
 
-This split is deliberate: it keeps the Pages app simple and pushes the stateful Telegram user login to a service that is actually meant to hold that session.
+This split is deliberate: the public bridge stays small and auditable, while the Telegram user session stays off Cloudflare Pages.
 
-### 1. Create a Telegram user session
+### 1. Create a Telegram user session file
 
 First create your own Telegram API credentials at `https://my.telegram.org`, then run:
 
 ```bash
-TG_USER_API_ID=123456 \
-TG_USER_API_HASH=your_hash \
-npm run mtproto:login
+cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-login -- \
+  --api-id 123456 \
+  --api-hash your_hash \
+  --session-file ./teleimg-user.session
 ```
 
-Save the printed `TG_USER_SESSION=...` value. Do **not** commit it.
-
-### 2. Run the MTProto bridge
-
-On a machine you control:
+You can also use the npm wrapper:
 
 ```bash
 TG_USER_API_ID=123456 \
 TG_USER_API_HASH=your_hash \
-TG_USER_SESSION=your_saved_session \
+TG_USER_SESSION_FILE=./teleimg-user.session \
+npm run mtproto:login
+```
+
+This creates a persistent SQLite session file such as `teleimg-user.session`. Do **not** commit it.
+
+### 2. Install and run the Rust bridge on your VPS
+
+Install the release binary onto the VPS:
+
+```bash
+cargo install --path mtproto-bridge-rs --root /usr/local
+```
+
+Run it directly:
+
+```bash
+TG_MT_BRIDGE_BIND=127.0.0.1:8788 \
 TG_MT_BRIDGE_SECRET=replace_with_long_random_secret \
-TG_MT_BRIDGE_PORT=8788 \
-npm run mtproto:bridge
+TG_USER_API_ID=123456 \
+TG_USER_SESSION_FILE=/var/lib/teleimg/teleimg-user.session \
+/usr/local/bin/teleimg-mtproto-bridge
 ```
 
 Health check:
@@ -168,7 +183,29 @@ Health check:
 curl http://127.0.0.1:8788/healthz
 ```
 
-### 3. Point Pages to the bridge
+Important note:
+
+- The bridge only needs `TG_USER_API_ID`, the SQLite `TG_USER_SESSION_FILE`, and `TG_MT_BRIDGE_SECRET` at runtime.
+- `TG_USER_API_HASH` is only needed during the login/bootstrap step.
+- The secure default bind is `127.0.0.1`; put it behind Caddy or Nginx for public HTTPS exposure.
+
+### 3. Reverse proxy it publicly
+
+Example files are included:
+
+- `ops/systemd/teleimg-mtproto-bridge.service.example`
+- `ops/systemd/mtproto-bridge.env.example`
+- `ops/caddy/teleimg-mtproto-bridge.Caddyfile.example`
+
+A typical deployment is:
+
+1. copy `teleimg-mtproto-bridge` to `/usr/local/bin/`
+2. store the session file under `/var/lib/teleimg/`
+3. store env vars in `/etc/teleimg/mtproto-bridge.env`
+4. run the systemd unit
+5. terminate TLS at Caddy/Nginx and proxy to `127.0.0.1:8788`
+
+### 4. Point Pages to the bridge
 
 Set these two variables in Cloudflare Pages:
 
@@ -176,4 +213,4 @@ Set these two variables in Cloudflare Pages:
 - `TG_MT_BRIDGE_SECRET=replace_with_long_random_secret`
 
 When Bot API `getFile` works, TeleImg still uses the normal bot file path.
-When Bot API says `file is too big`, TeleImg now issues a short-lived signed redirect to the bridge.
+When Bot API says `file is too big`, TeleImg now issues a short-lived signed redirect to the Rust bridge.
