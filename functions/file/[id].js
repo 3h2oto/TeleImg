@@ -1,6 +1,6 @@
 import { getOrCreateMetadata } from '../_lib/kv.js';
-import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFilePath } from '../_lib/telegram.js';
-import { redirect, serviceUnavailable } from '../_lib/http.js';
+import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFile } from '../_lib/telegram.js';
+import { redirect, serviceUnavailable, text } from '../_lib/http.js';
 import { getRuntimeConfig } from '../_lib/runtime-config.js';
 
 function isAdminPreview(request) {
@@ -38,19 +38,48 @@ function copyForwardHeaders(request) {
 
 async function resolveUpstreamUrl(config, env, key, search = '') {
   if (!isTelegramFileKey(key)) {
-    return buildLegacyTelegraphUrl(key, search);
+    return { ok: true, upstreamUrl: buildLegacyTelegraphUrl(key, search) };
   }
 
   if (!config.TG_Bot_Token) {
     throw serviceUnavailable('TG_Bot_Token is required to serve Telegram-backed files.');
   }
 
-  const filePath = await lookupTelegramFilePath({ ...env, TG_Bot_Token: config.TG_Bot_Token }, getTelegramFileId(key));
-  if (!filePath) {
-    return null;
+  const lookup = await lookupTelegramFile({ ...env, TG_Bot_Token: config.TG_Bot_Token }, getTelegramFileId(key));
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      status: lookup.description?.toLowerCase().includes('file is too big') ? 413 : 502,
+      message: lookup.description?.toLowerCase().includes('file is too big')
+        ? 'Telegram Bot API cannot serve this file because Telegram reported it is too big for bot download. The admin can show its metadata, but serving the binary requires external storage or a user-session/MTProto based fetch path.'
+        : `Telegram getFile failed: ${lookup.description || 'unknown error'}.`,
+      telegramError: lookup.description || 'unknown error'
+    };
   }
 
-  return `https://api.telegram.org/file/bot${config.TG_Bot_Token}/${filePath}`;
+  if (!lookup.filePath) {
+    return { ok: false, status: 404, message: 'File not found.', telegramError: 'missing file_path' };
+  }
+
+  return {
+    ok: true,
+    upstreamUrl: `https://api.telegram.org/file/bot${config.TG_Bot_Token}/${lookup.filePath}`
+  };
+}
+
+function telegramFailureResponse(key, resolution) {
+  const headers = { 'cache-control': 'no-store' };
+  const suffix = resolution?.telegramError && resolution?.message !== resolution?.telegramError
+    ? `\nTelegram said: ${resolution.telegramError}`
+    : '';
+  const body = resolution?.status === 404
+    ? 'File not found.'
+    : (resolution?.message || `Cannot open Telegram-backed file ${key}.`) + suffix;
+  const normalizedBody = body.endsWith('.') || body.endsWith('"') ? body : `${body}.`;
+  return text(normalizedBody, {
+    status: resolution?.status || 502,
+    headers
+  });
 }
 
 async function moderateLegacyAsset(config, env, requestUrl, key, metadata) {
@@ -91,16 +120,16 @@ export async function onRequest(context) {
 
   let upstreamUrl;
   try {
-    upstreamUrl = await resolveUpstreamUrl(config, env, key, url.search);
+    const resolution = await resolveUpstreamUrl(config, env, key, url.search);
+    if (!resolution.ok) {
+      return telegramFailureResponse(key, resolution);
+    }
+    upstreamUrl = resolution.upstreamUrl;
   } catch (response) {
     if (response instanceof Response) {
       return response;
     }
     throw response;
-  }
-
-  if (!upstreamUrl) {
-    return new Response('File not found.', { status: 404 });
   }
 
   const upstreamResponse = await fetch(upstreamUrl, {

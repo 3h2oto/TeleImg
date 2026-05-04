@@ -166,6 +166,17 @@ export async function lookupTelegramFilePath(env, fileId) {
   return result.ok ? result.result?.file_path ?? null : null;
 }
 
+export async function lookupTelegramFile(env, fileId) {
+  const result = await callTelegramApi(env, 'getFile', { file_id: fileId });
+  return {
+    ok: result.ok,
+    status: result.status,
+    errorCode: result.errorCode,
+    description: result.description,
+    filePath: result.ok ? result.result?.file_path ?? null : null
+  };
+}
+
 export async function getTelegramWebhookInfo(env, options = {}) {
   return callTelegramApi(env, 'getWebhookInfo', {}, options);
 }
