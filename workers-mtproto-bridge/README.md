@@ -69,6 +69,7 @@ This project already:
 - forwards authorized requests into a Durable Object
 - creates a GramJS client inside the Durable Object
 - uses outbound TCP sockets so it stays compatible with Workers Free plan
+- supports `HEAD` and single `Range: bytes=...` requests for resumable media access
 - streams `/healthz` correctly in local Wrangler dev
 - bundles successfully with `wrangler deploy --dry-run`
 

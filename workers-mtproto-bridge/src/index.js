@@ -1,13 +1,15 @@
 import { connect } from 'cloudflare:sockets';
 import { Buffer } from 'node:buffer';
+import bigInt from 'big-integer';
 
-import { TelegramClient } from 'telegram';
+import { TelegramClient, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 
 import { buildMtprotoBridgePayload, verifyMtprotoBridgePayload } from '../../shared/mtproto-bridge.js';
 
 const DEFAULT_REQUEST_SIZE = 256 * 1024;
 const CLOSE_ERROR = new Error('Cloudflare socket was closed');
+const ACCEPT_RANGES = 'bytes';
 
 function json(data, init = {}) {
   const headers = new Headers(init.headers);
@@ -69,6 +71,127 @@ function encodeContentDisposition(fileName) {
   return `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
+function normalizeMediaSize(size) {
+  if (size == null) {
+    return null;
+  }
+
+  if (typeof size === 'number' && Number.isFinite(size)) {
+    return size;
+  }
+
+  if (typeof size?.toJSNumber === 'function') {
+    return size.toJSNumber();
+  }
+
+  const value = Number(size?.toString?.() ?? size);
+  return Number.isFinite(value) ? value : null;
+}
+
+function create416(size) {
+  return text('Requested Range Not Satisfiable', {
+    status: 416,
+    headers: {
+      'cache-control': 'no-store',
+      'accept-ranges': ACCEPT_RANGES,
+      'content-range': `bytes */${size}`
+    }
+  });
+}
+
+function parseRangeHeader(header, size) {
+  if (!header) {
+    return null;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match) {
+    return { invalid: true };
+  }
+
+  const [, rawStart, rawEnd] = match;
+  if (!rawStart && !rawEnd) {
+    return { invalid: true };
+  }
+
+  let start;
+  let end;
+
+  if (!rawStart) {
+    const suffixLength = Number.parseInt(rawEnd, 10);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+      return { invalid: true };
+    }
+    if (suffixLength >= size) {
+      start = 0;
+    } else {
+      start = size - suffixLength;
+    }
+    end = size - 1;
+  } else {
+    start = Number.parseInt(rawStart, 10);
+    end = rawEnd ? Number.parseInt(rawEnd, 10) : size - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < 0 || start > end || start >= size) {
+    return { invalid: true };
+  }
+
+  end = Math.min(end, size - 1);
+  return {
+    start,
+    end,
+    length: end - start + 1
+  };
+}
+
+function createRangeStream(downloadIter, range) {
+  const iterator = downloadIter[Symbol.asyncIterator]();
+  let remaining = range.length;
+
+  return new ReadableStream({
+    async pull(controller) {
+      if (remaining <= 0) {
+        controller.close();
+        if (typeof downloadIter.close === 'function') {
+          await downloadIter.close();
+        }
+        return;
+      }
+
+      const result = await iterator.next();
+      if (result.done) {
+        controller.close();
+        if (typeof downloadIter.close === 'function') {
+          await downloadIter.close();
+        }
+        return;
+      }
+
+      const chunk = result.value instanceof Uint8Array ? result.value : new Uint8Array(result.value);
+      if (chunk.byteLength > remaining) {
+        controller.enqueue(chunk.subarray(0, remaining));
+        remaining = 0;
+      } else {
+        controller.enqueue(chunk);
+        remaining -= chunk.byteLength;
+      }
+
+      if (remaining <= 0) {
+        controller.close();
+        if (typeof downloadIter.close === 'function') {
+          await downloadIter.close();
+        }
+      }
+    },
+    async cancel() {
+      if (typeof downloadIter.close === 'function') {
+        await downloadIter.close();
+      }
+    }
+  });
+}
+
 async function readQueryPayload(url) {
   const payload = buildMtprotoBridgePayload({
     key: url.searchParams.get('key') || '',
@@ -101,10 +224,10 @@ export default {
       return text('Not found.', { status: 404, headers: { 'cache-control': 'no-store' } });
     }
 
-    if (request.method !== 'GET') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
       return text('Method Not Allowed', {
         status: 405,
-        headers: { allow: 'GET', 'cache-control': 'no-store' }
+        headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' }
       });
     }
 
@@ -170,7 +293,7 @@ export class MtprotoBridgeDO {
     }
 
     try {
-      const response = await this.handleDownload(url);
+      const response = await this.handleDownload(request, url);
       this.status.lastDownloadAt = Date.now();
       this.status.lastError = null;
       return response;
@@ -181,7 +304,7 @@ export class MtprotoBridgeDO {
     }
   }
 
-  async handleDownload(url) {
+  async handleDownload(request, url) {
     const chatId = url.searchParams.get('chatId') || '';
     const messageId = Number.parseInt(url.searchParams.get('messageId') || '', 10);
     const fileName = sanitizeFileName(url.searchParams.get('name') || '', url.searchParams.get('key') || 'telegram-file');
@@ -196,6 +319,52 @@ export class MtprotoBridgeDO {
     const message = messages?.[0];
     if (!message?.media) {
       throw new Error(`Telegram message ${messageId} has no downloadable media.`);
+    }
+
+    const fileInfo = utils.getFileInfo(message.media);
+    const fileSize = normalizeMediaSize(fileInfo?.size);
+    const contentType = inferContentType(fileName);
+    const baseHeaders = {
+      'content-type': contentType,
+      'content-disposition': encodeContentDisposition(fileName),
+      'cache-control': 'private, no-store',
+      'accept-ranges': ACCEPT_RANGES
+    };
+
+    const range = fileSize != null ? parseRangeHeader(request.headers.get('range'), fileSize) : null;
+    if (range?.invalid && fileSize != null) {
+      return create416(fileSize);
+    }
+
+    if (request.method === 'HEAD') {
+      const headers = { ...baseHeaders };
+      if (range && fileSize != null) {
+        headers['content-range'] = `bytes ${range.start}-${range.end}/${fileSize}`;
+        headers['content-length'] = String(range.length);
+        return new Response(null, { status: 206, headers });
+      }
+      if (fileSize != null) {
+        headers['content-length'] = String(fileSize);
+      }
+      return new Response(null, { status: 200, headers });
+    }
+
+    if (range && fileSize != null) {
+      const downloadIter = client.iterDownload({
+        file: message.media,
+        offset: bigInt(range.start),
+        requestSize: DEFAULT_REQUEST_SIZE,
+        limit: Math.max(1, Math.ceil(range.length / DEFAULT_REQUEST_SIZE))
+      });
+
+      return new Response(createRangeStream(downloadIter, range), {
+        status: 206,
+        headers: {
+          ...baseHeaders,
+          'content-range': `bytes ${range.start}-${range.end}/${fileSize}`,
+          'content-length': String(range.length)
+        }
+      });
     }
 
     const stream = new ReadableStream({
@@ -222,11 +391,7 @@ export class MtprotoBridgeDO {
 
     return new Response(stream, {
       status: 200,
-      headers: {
-        'content-type': inferContentType(fileName),
-        'content-disposition': encodeContentDisposition(fileName),
-        'cache-control': 'private, no-store'
-      }
+      headers: fileSize != null ? { ...baseHeaders, 'content-length': String(fileSize) } : baseHeaders
     });
   }
 
