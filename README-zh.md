@@ -237,3 +237,52 @@ npm run mtproto:worker:deploy -- --dry-run
 ```
 
 部署前先看 `workers-mtproto-bridge/README.md`。
+
+## WebDAV（Linux 优先的 MVP）
+
+现在项目已经有一个可用的 `/dav/*` WebDAV 门面，优先面向 Linux 客户端。
+
+当前已支持：
+
+- `OPTIONS`
+- `PROPFIND`
+- `GET`
+- `HEAD`
+- `PUT`
+- `DELETE`
+- `MKCOL`
+- `MOVE`
+
+实现说明：
+
+- 文件内容仍然落在现有 Telegram / bridge / KV 体系里
+- WebDAV 只是协议门面，不是另一套独立存储
+- 目录采用“虚拟目录”模型
+
+### Linux 快速试用
+
+先确保你已经配置了站点的 Basic Auth，然后可以直接用支持 WebDAV 的客户端挂载。
+
+例如先用 `cadaver` 验证：
+
+```bash
+cadaver https://img.vicco.eu.org/dav/
+```
+
+或者用 `davfs2` 挂载：
+
+```bash
+sudo mkdir -p /mnt/teleimg
+sudo mount -t davfs https://img.vicco.eu.org/dav/ /mnt/teleimg
+```
+
+认证时使用：
+
+- 用户名：`BASIC_USER`
+- 密码：`BASIC_PASS`
+
+### 当前限制
+
+- 这是 Linux 优先的 MVP，不追求 Finder / Windows Explorer 的原生兼容怪癖
+- 目前是单 Range 支持，不是 multi-range
+- 还没有实现 `COPY`

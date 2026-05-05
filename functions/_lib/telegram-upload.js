@@ -1,0 +1,113 @@
+import { normalizeMetadata, sanitizeFileName } from './kv.js';
+import { extractUploadedFileId, extractUploadedMessage, extractTelegramMedia, inferExtension, selectUploadEndpoint } from './telegram.js';
+
+async function sendToTelegram(formData, apiEndpoint, botToken, retryCount = 0) {
+  const maxRetries = 2;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/${apiEndpoint}`;
+
+  try {
+    const response = await fetch(apiUrl, { method: 'POST', body: formData });
+    const responseData = await response.json();
+
+    if (response.ok) {
+      return { success: true, data: responseData };
+    }
+
+    if (retryCount < maxRetries && apiEndpoint === 'sendPhoto') {
+      const fallback = new FormData();
+      fallback.append('chat_id', formData.get('chat_id'));
+      fallback.append('document', formData.get('photo'));
+      return sendToTelegram(fallback, 'sendDocument', botToken, retryCount + 1);
+    }
+
+    return {
+      success: false,
+      error: responseData?.description || 'Upload to Telegram failed.'
+    };
+  } catch (error) {
+    if (retryCount < maxRetries) {
+      await new Promise((resolve) => setTimeout(resolve, 200 * (retryCount + 1)));
+      return sendToTelegram(formData, apiEndpoint, botToken, retryCount + 1);
+    }
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Network error occurred.'
+    };
+  }
+}
+
+function buildTelegramInfo(uploadMessage, uploadFile) {
+  const media = extractTelegramMedia(uploadMessage);
+  const info = {
+    chatId: uploadMessage?.chat?.id,
+    chatTitle: uploadMessage?.chat?.title || '',
+    chatType: uploadMessage?.chat?.type || '',
+    messageId: uploadMessage?.message_id,
+    fileId: media?.file_id,
+    fileUniqueId: media?.file_unique_id,
+    mediaKind: media?.kind || '',
+    mediaGroupId: uploadMessage?.media_group_id,
+    date: uploadMessage?.date,
+    source: 'sendMessageResponse',
+    viaWebhook: false,
+    fileName: uploadFile?.name
+  };
+
+  return {
+    telegram: info,
+    telegramChatId: info.chatId,
+    telegramChatTitle: info.chatTitle,
+    telegramChatType: info.chatType,
+    telegramMessageId: info.messageId,
+    telegramFileId: info.fileId,
+    telegramFileUniqueId: info.fileUniqueId,
+    telegramMediaKind: info.mediaKind,
+    telegramMediaGroupId: info.mediaGroupId,
+    telegramDate: info.date,
+    telegramSource: info.source,
+    telegramViaWebhook: info.viaWebhook
+  };
+}
+
+export async function uploadFileToTelegram(env, config, uploadFile, options = {}) {
+  const [fieldName, endpoint] = selectUploadEndpoint(uploadFile);
+  const telegramFormData = new FormData();
+  telegramFormData.append('chat_id', config.TG_Chat_ID);
+  telegramFormData.append(fieldName, uploadFile, uploadFile.name);
+
+  const result = await sendToTelegram(telegramFormData, endpoint, config.TG_Bot_Token);
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+
+  const fileId = extractUploadedFileId(result.data);
+  if (!fileId) {
+    return { success: false, error: 'Failed to get file ID from Telegram response.' };
+  }
+
+  const extension = inferExtension(uploadFile);
+  const key = `${fileId}.${extension}`;
+  const uploadMessage = extractUploadedMessage(result.data);
+  const metadata = normalizeMetadata(key, {
+    fileName: sanitizeFileName(options.fileName || uploadFile.name, key),
+    fileSize: uploadFile.size,
+    liked: false,
+    ListType: 'None',
+    Label: 'None',
+    TimeStamp: Date.now(),
+    source: options.source || 'web-upload',
+    caption: uploadMessage?.caption || '',
+    ...buildTelegramInfo(uploadMessage, uploadFile)
+  });
+
+  if (env.img_url) {
+    await env.img_url.put(key, '', { metadata });
+  }
+
+  return {
+    success: true,
+    key,
+    metadata
+  };
+}

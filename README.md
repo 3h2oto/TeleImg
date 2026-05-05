@@ -237,3 +237,52 @@ npm run mtproto:worker:deploy -- --dry-run
 ```
 
 Read `workers-mtproto-bridge/README.md` before deploying it.
+
+## WebDAV (Linux-first MVP)
+
+The project now exposes a usable `/dav/*` WebDAV facade aimed primarily at Linux clients.
+
+Currently supported:
+
+- `OPTIONS`
+- `PROPFIND`
+- `GET`
+- `HEAD`
+- `PUT`
+- `DELETE`
+- `MKCOL`
+- `MOVE`
+
+Implementation notes:
+
+- file bytes still live in the existing Telegram / bridge / KV stack
+- WebDAV is just another protocol facade over the same storage core
+- directories are virtual
+
+### Quick Linux usage
+
+After enabling the site's Basic Auth, you can mount it with a Linux WebDAV client.
+
+Quick probe with `cadaver`:
+
+```bash
+cadaver https://img.vicco.eu.org/dav/
+```
+
+Or mount with `davfs2`:
+
+```bash
+sudo mkdir -p /mnt/teleimg
+sudo mount -t davfs https://img.vicco.eu.org/dav/ /mnt/teleimg
+```
+
+Authenticate with:
+
+- username: `BASIC_USER`
+- password: `BASIC_PASS`
+
+### Current limitations
+
+- this is a Linux-first MVP, not a Finder / Windows Explorer compatibility exercise
+- single-range only, not multi-range
+- `COPY` is not implemented yet
