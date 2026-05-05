@@ -1,0 +1,5 @@
+TG_MT_BRIDGE_SECRET=replace_with_random_secret
+TG_USER_API_ID=123456
+TG_USER_API_HASH=replace_with_hash
+TG_MT_STRING_SESSION=replace_with_gramjs_string_session
+TG_MT_DIALOG_SCAN_LIMIT=200

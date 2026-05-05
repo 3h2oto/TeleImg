@@ -14,7 +14,11 @@
     "ci": "npm run check && npm run test && npm run build",
     "cf:whoami": "wrangler whoami",
     "mtproto:login": "cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-login --",
-    "mtproto:bridge": "cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-bridge --"
+    "mtproto:bridge": "cargo run --manifest-path mtproto-bridge-rs/Cargo.toml --bin teleimg-mtproto-bridge --",
+    "mtproto:worker:check": "npm --prefix workers-mtproto-bridge run check",
+    "mtproto:worker:dev": "npm --prefix workers-mtproto-bridge run dev",
+    "mtproto:worker:deploy": "npm --prefix workers-mtproto-bridge run deploy",
+    "mtproto:worker:login": "node workers-mtproto-bridge/tools/login.mjs"
   },
   "dependencies": {
     "astro": "^6.2.1"

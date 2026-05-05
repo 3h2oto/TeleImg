@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "workers-mtproto-bridge",
+  "main": "src/index.js",
+  "compatibility_date": "2026-05-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MT_BRIDGE",
+        "class_name": "MtprotoBridgeDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MtprotoBridgeDO"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

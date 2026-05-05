@@ -214,3 +214,26 @@ curl http://127.0.0.1:8788/healthz
 
 - `getFile` 正常：继续走原来的 Bot API 文件链路。
 - `getFile` 返回 `file is too big`：改走短时效签名的 Rust MTProto bridge 下载链路。
+
+## Workers Free plan 版 MTProto bridge（实验态）
+
+如果你不想依赖 VPS 上的付费网络入口，而是希望尽量待在 **Workers Free plan** 能力边界内，仓库里现在还有一个独立子项目：
+
+- `workers-mtproto-bridge/`
+
+它的设计基于：
+
+- Worker HTTP 入口
+- 一个 SQLite-backed Durable Object
+- outbound TCP sockets
+- 一个 GramJS `StringSession` secret
+
+常用命令：
+
+```bash
+npm run mtproto:worker:check
+npm run mtproto:worker:dev
+npm run mtproto:worker:deploy -- --dry-run
+```
+
+部署前先看 `workers-mtproto-bridge/README.md`。

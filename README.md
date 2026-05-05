@@ -214,3 +214,26 @@ Set these two variables in Cloudflare Pages:
 
 When Bot API `getFile` works, TeleImg still uses the normal bot file path.
 When Bot API says `file is too big`, TeleImg now issues a short-lived signed redirect to the Rust bridge.
+
+## Workers Free plan MTProto bridge (experimental)
+
+If you want to avoid any VPS-only paid features and stay inside **Workers Free plan** capabilities, this repo now also contains a separate subproject:
+
+- `workers-mtproto-bridge/`
+
+It is designed around:
+
+- Worker HTTP entrypoint
+- one SQLite-backed Durable Object
+- outbound TCP sockets
+- a GramJS `StringSession` secret
+
+Quick commands:
+
+```bash
+npm run mtproto:worker:check
+npm run mtproto:worker:dev
+npm run mtproto:worker:deploy -- --dry-run
+```
+
+Read `workers-mtproto-bridge/README.md` before deploying it.
