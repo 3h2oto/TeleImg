@@ -277,6 +277,7 @@ export class MtprotoBridgeDO {
     const url = new URL(request.url);
 
     if (url.pathname === '/internal/status') {
+      await this.refreshHealth();
       return json({
         ok: this.status.connected && this.status.authorized,
         route: '/telegram/file',
@@ -301,6 +302,17 @@ export class MtprotoBridgeDO {
       this.status.lastError = error instanceof Error ? error.message : 'Unknown bridge error';
       this.status.connected = false;
       return json({ error: this.status.lastError }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  async refreshHealth() {
+    try {
+      await this.getClient();
+      this.status.lastError = null;
+    } catch (error) {
+      this.status.connected = false;
+      this.status.authorized = false;
+      this.status.lastError = error instanceof Error ? error.message : 'Bridge health refresh failed.';
     }
   }
 

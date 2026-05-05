@@ -100,11 +100,20 @@
         const pending = payload?.webhook?.pending_update_count ?? 0;
         const bot = payload?.bot?.username ? `@${payload.bot.username}` : '未知';
         const readAll = payload?.bot?.canReadAllGroupMessages;
+        const bridge = payload?.bridge;
         const chips = [
           `Bot：${bot}`,
           `Webhook：${webhookUrl}`,
           `Pending：${pending}`,
           `群消息读取：${readAll === null ? '未知' : (readAll ? '已开启' : '未开启')}`,
+          bridge?.configured ? `大文件桥：${bridge.ok ? '在线' : '异常'}` : '大文件桥：未配置',
+          bridge?.configured ? `桥接后端：${bridge.backend === 'workers-free' ? 'Workers Free' : '外置'}` : null,
+          bridge?.host ? `桥接域名：${bridge.host}` : null,
+          bridge?.health?.connected !== undefined ? `桥连接：${bridge.health.connected ? '已连' : '未连'}` : null,
+          bridge?.health?.authorized !== undefined ? `桥授权：${bridge.health.authorized ? '已授权' : '未授权'}` : null,
+          bridge?.health?.cachedPeers !== undefined ? `桥缓存聊天：${bridge.health.cachedPeers}` : null,
+          bridge?.health?.lastDownloadAt ? `桥最近下载：${formatTime(bridge.health.lastDownloadAt)}` : null,
+          bridge?.error ? `桥错误：${bridge.error}` : null,
           payload?.syncState?.lastWebhookAt ? `最近 webhook：${formatTime(payload.syncState.lastWebhookAt)}` : null,
           payload?.syncState?.lastSyncAt ? `最近 sync：${formatTime(payload.syncState.lastSyncAt)}` : null,
           Number.isFinite(payload?.syncState?.offset) ? `offset：${payload.syncState.offset}` : null

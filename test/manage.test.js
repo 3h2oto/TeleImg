@@ -4,6 +4,7 @@ import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[i
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
 import { onRequest as list } from '../functions/api/manage/list.js';
+import { onRequest as telegramStatus } from '../functions/api/manage/telegram/status.js';
 import { onRequest as toggleLike } from '../functions/api/manage/toggleLike/[id].js';
 import { processTelegramUpdates } from '../functions/_lib/telegram-sync.js';
 import { createKv } from './helpers.js';
@@ -144,5 +145,58 @@ describe('manage endpoints', () => {
     const payload = await response.json();
     expect(payload.telegramDeleted).toBe(true);
     expect(await env.img_url.getWithMetadata('abc.png')).toBeNull();
+  });
+
+  it('includes worker bridge health in telegram status', async () => {
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/getMe')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: { id: 1, username: 'bot', can_read_all_group_messages: true }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url.includes('/getWebhookInfo')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: { url: 'https://teleimg.example/api/telegram/webhook', pending_update_count: 3 }
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === 'https://bridge.example.com/healthz') {
+        return new Response(JSON.stringify({
+          ok: true,
+          freePlanReady: true,
+          connected: true,
+          authorized: true,
+          cachedPeers: 4,
+          lastDownloadAt: 1234
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const response = await telegramStatus({
+      env: {
+        TG_Bot_Token: 'token',
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        img_url: createKv()
+      },
+      request: new Request('https://example.com/api/manage/telegram/status')
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.bridge.configured).toBe(true);
+    expect(payload.bridge.backend).toBe('workers-free');
+    expect(payload.bridge.ok).toBe(true);
+    expect(payload.bridge.host).toBe('bridge.example.com');
+    expect(payload.bridge.health.connected).toBe(true);
+    expect(payload.bridge.health.cachedPeers).toBe(4);
   });
 });
