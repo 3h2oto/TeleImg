@@ -34,6 +34,10 @@ body {
   min-height: 100vh;
 }
 
+body.admin-page {
+  background: #000000;
+}
+
 a {
   color: inherit;
 }
@@ -67,6 +71,13 @@ textarea {
   border-radius: 28px;
   box-shadow: 0 24px 100px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(168, 255, 96, 0.05), 0 0 120px rgba(57, 242, 174, 0.05);
   backdrop-filter: blur(18px);
+}
+
+body.admin-page .admin-shell {
+  background: #090909;
+  border-color: rgba(168, 255, 96, 0.14);
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .hero-card {
@@ -197,6 +208,12 @@ textarea {
   color: var(--text);
 }
 
+body.admin-page .ghost-button,
+body.admin-page .link-button {
+  background: #0d0d0d;
+  border-color: rgba(168, 255, 96, 0.12);
+}
+
 .ghost-button:hover,
 .primary-button:hover,
 .link-button:hover {
@@ -236,6 +253,15 @@ textarea {
   background: rgba(25, 25, 25, 0.88);
 }
 
+body.admin-page .result-box,
+body.admin-page .search-bar,
+body.admin-page .summary-row,
+body.admin-page .bridge-panel,
+body.admin-page .media-card {
+  background: #0b0b0b;
+  border-color: rgba(168, 255, 96, 0.1);
+}
+
 .result-box {
   padding: 14px;
 }
@@ -254,6 +280,12 @@ input[type='search'] {
   border: 1px solid var(--line-strong);
   background: rgba(18, 18, 18, 0.96);
   color: var(--text);
+}
+
+body.admin-page textarea,
+body.admin-page input[type='search'] {
+  background: #060606;
+  border-color: rgba(57, 242, 174, 0.14);
 }
 
 textarea {
@@ -321,6 +353,11 @@ textarea {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(15, 23, 42, 0.45);
+}
+
+body.admin-page .bridge-panel__grid div {
+  background: #101010;
+  border-color: rgba(168, 255, 96, 0.08);
 }
 
 .bridge-panel__grid dt {
@@ -394,6 +431,10 @@ textarea {
   display: grid;
   place-items: center;
   overflow: hidden;
+}
+
+body.admin-page .preview-frame {
+  background: #050505;
 }
 
 .preview-frame img,

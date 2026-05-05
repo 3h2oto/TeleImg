@@ -4,11 +4,13 @@ import '../styles/global.css';
 interface Props {
   title?: string;
   description?: string;
+  bodyClass?: string;
 }
 
 const {
   title = 'TeleImg',
-  description = 'Cloudflare Pages + Astro image host backed by Telegram Bot API.'
+  description = 'Cloudflare Pages + Astro image host backed by Telegram Bot API.',
+  bodyClass = ''
 } = Astro.props;
 ---
 
@@ -21,7 +23,7 @@ const {
     <title>{title}</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
   </head>
-  <body>
+  <body class={bodyClass}>
     <slot />
   </body>
 </html>
