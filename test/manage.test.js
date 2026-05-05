@@ -4,6 +4,7 @@ import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[i
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
 import { onRequest as list } from '../functions/api/manage/list.js';
+import { onRequest as bridgeWarmup } from '../functions/api/manage/telegram/bridge-warmup.js';
 import { onRequest as telegramStatus } from '../functions/api/manage/telegram/status.js';
 import { onRequest as toggleLike } from '../functions/api/manage/toggleLike/[id].js';
 import { processTelegramUpdates } from '../functions/_lib/telegram-sync.js';
@@ -198,5 +199,40 @@ describe('manage endpoints', () => {
     expect(payload.bridge.host).toBe('bridge.example.com');
     expect(payload.bridge.health.connected).toBe(true);
     expect(payload.bridge.health.cachedPeers).toBe(4);
+  });
+
+  it('runs bridge warmup and returns bridge summary', async () => {
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === 'https://bridge.example.com/healthz') {
+        return new Response(JSON.stringify({
+          ok: true,
+          freePlanReady: true,
+          connected: true,
+          authorized: true,
+          cachedPeers: 2
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      return new Response(JSON.stringify({ ok: true, result: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const response = await bridgeWarmup({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        img_url: createKv()
+      },
+      request: new Request('https://example.com/api/manage/telegram/bridge-warmup', { method: 'POST' })
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.bridge.ok).toBe(true);
+    expect(payload.bridge.backend).toBe('workers-free');
+    expect(payload.message).toContain('桥接在线');
   });
 });
