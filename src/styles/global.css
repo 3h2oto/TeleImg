@@ -229,6 +229,7 @@ textarea {
 .result-box,
 .search-bar,
 .summary-row,
+.bridge-panel,
 .media-card {
   border-radius: 18px;
   border: 1px solid var(--line);
@@ -265,7 +266,8 @@ textarea {
 
 .admin-header,
 .search-bar,
-.summary-row {
+.summary-row,
+.bridge-panel {
   margin-bottom: 20px;
 }
 
@@ -291,6 +293,55 @@ textarea {
   flex-wrap: wrap;
   gap: 10px;
   padding: 12px 14px;
+}
+
+.bridge-panel {
+  padding: 16px 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.bridge-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-panel__grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.bridge-panel__grid div {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.bridge-panel__grid dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.bridge-panel__grid dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.bridge-panel__tone[data-tone='ok'] {
+  color: var(--success);
+  border-color: rgba(57, 242, 174, 0.3);
+}
+
+.bridge-panel__tone[data-tone='error'] {
+  color: #fecdd3;
+  border-color: rgba(245, 81, 66, 0.32);
 }
 
 .meta-chip,
