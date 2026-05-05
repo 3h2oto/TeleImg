@@ -198,27 +198,24 @@ export class MtprotoBridgeDO {
       throw new Error(`Telegram message ${messageId} has no downloadable media.`);
     }
 
-    const iterator = client.iterDownload({
-      file: message.media,
-      requestSize: DEFAULT_REQUEST_SIZE
-    });
-
     const stream = new ReadableStream({
-      async pull(controller) {
-        const result = await iterator.next();
-        if (result.done) {
-          controller.close();
-          if (typeof iterator.close === 'function') {
-            await iterator.close();
+      async start(controller) {
+        const writer = {
+          async write(chunk) {
+            controller.enqueue(chunk);
+          },
+          close() {
+            controller.close();
           }
-          return;
-        }
+        };
 
-        controller.enqueue(result.value);
-      },
-      async cancel() {
-        if (typeof iterator.close === 'function') {
-          await iterator.close();
+        try {
+          await client.downloadMedia(message, {
+            outputFile: writer,
+            progressCallback: undefined
+          });
+        } catch (error) {
+          controller.error(error);
         }
       }
     });
