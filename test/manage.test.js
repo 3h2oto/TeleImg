@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { onRequest as browseDav } from '../functions/api/manage/dav/browse.js';
 import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[id].js';
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
@@ -7,6 +8,7 @@ import { onRequest as list } from '../functions/api/manage/list.js';
 import { onRequest as bridgeWarmup } from '../functions/api/manage/telegram/bridge-warmup.js';
 import { onRequest as telegramStatus } from '../functions/api/manage/telegram/status.js';
 import { onRequest as toggleLike } from '../functions/api/manage/toggleLike/[id].js';
+import { getDavEntryKey } from '../functions/_lib/dav.js';
 import { processTelegramUpdates } from '../functions/_lib/telegram-sync.js';
 import { createKv } from './helpers.js';
 
@@ -109,6 +111,54 @@ describe('manage endpoints', () => {
     const payload = await response.json();
     expect(payload.keys).toHaveLength(1);
     expect(payload.keys[0].metadata.fileName).toBe('fresh-name.png');
+  });
+
+  it('browses DAV folders with enriched file metadata', async () => {
+    const env = {
+      img_url: createKv({
+        'key-1.jpg': {
+          fileName: 'cover.jpg',
+          fileSize: 12,
+          TimeStamp: 2,
+          telegram: { chatId: '-10001', messageId: 9, fileId: 'key-1' }
+        },
+        [getDavEntryKey('/albums')]: {
+          value: JSON.stringify({
+            kind: 'collection',
+            path: '/albums',
+            name: 'albums',
+            createdAt: 1,
+            updatedAt: 1
+          })
+        },
+        [getDavEntryKey('/albums/cover.jpg')]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path: '/albums/cover.jpg',
+            name: 'cover.jpg',
+            storageKey: 'key-1.jpg',
+            size: 12,
+            contentType: 'image/jpeg',
+            createdAt: 2,
+            updatedAt: 2
+          })
+        }
+      })
+    };
+
+    const response = await browseDav({
+      env,
+      request: new Request('https://example.com/api/manage/dav/browse?path=/albums')
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.path).toBe('/albums');
+    expect(payload.counts.files).toBe(1);
+    expect(payload.files[0].name).toBe('key-1.jpg');
+    expect(payload.files[0].davPath).toBe('/albums/cover.jpg');
+    expect(payload.files[0].metadata.fileName).toBe('cover.jpg');
+    expect(payload.files[0].canDeleteTelegram).toBe(true);
   });
 
   it('syncs Telegram direct uploads into KV records', async () => {

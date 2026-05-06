@@ -160,17 +160,18 @@ function matchesSearch(entry, search) {
   return haystacks.some((value) => value.includes(search));
 }
 
-async function enrichKey(env, entry) {
-  const fresh = await env.img_url.getWithMetadata(entry.name).catch(() => null);
+export async function getEnrichedRecord(env, key, fallbackEntry = null) {
+  const fresh = await env.img_url.getWithMetadata(key).catch(() => null);
   if (!fresh) {
     return null;
   }
 
-  const metadata = normalizeMetadata(entry.name, fresh.metadata ?? entry.metadata);
+  const metadata = normalizeMetadata(key, fresh.metadata ?? fallbackEntry?.metadata);
   return {
-    ...entry,
+    ...(fallbackEntry || { name: key }),
+    name: key,
     metadata,
-    url: `/file/${encodeURIComponent(entry.name)}`,
+    url: `/file/${encodeURIComponent(key)}`,
     canDeleteTelegram: Boolean(metadata.telegram?.chatId && metadata.telegram?.messageId)
   };
 }
@@ -192,7 +193,7 @@ export async function listRecords(env, { limit = 100, cursor, prefix, search } =
     currentCursor = page.cursor;
     scanned += page.keys.length;
 
-    const enrichedEntries = await Promise.all(page.keys.map((entry) => enrichKey(env, entry)));
+    const enrichedEntries = await Promise.all(page.keys.map((entry) => getEnrichedRecord(env, entry.name, entry)));
 
     for (const enriched of enrichedEntries) {
       if (!enriched) {

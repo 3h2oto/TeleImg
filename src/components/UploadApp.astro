@@ -1,16 +1,14 @@
 ---
 interface Props {
-  defaultMarkdown?: boolean;
   title?: string;
 }
 
 const {
-  defaultMarkdown = false,
   title = 'TeleImg'
 } = Astro.props;
 ---
 
-<section class="telegraph-page" data-upload-app data-markdown-default={defaultMarkdown ? 'true' : 'false'}>
+<section class="telegraph-page" data-landing-app>
   <div class="telegraph-background" aria-hidden="true">
     <div class="telegraph-background-slider" data-role="background-slider"></div>
   </div>
@@ -27,237 +25,60 @@ const {
   </div>
 
   <div class="telegraph-main">
-    <div class="telegraph-title">{title}</div>
-
-    <div class="telegraph-upload-main" data-role="upload-main">
-      <div class="telegraph-wrapper waitting" data-role="wrapper">
-        <div class="telegraph-area waitting" data-state="waitting">
-          <div class="svg-wrapper flex" data-role="dropzone">
-            <div class="svg-box">
-              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="upload-icon">
-                <path d="M422.4 704l-94.72-143.36c-15.36-23.04-46.08-30.72-71.68-15.36l-15.36 15.36-130.56 204.8c-12.8 25.6-7.68 56.32 17.92 71.68 7.68 5.12 17.92 7.68 25.6 7.68h256c28.16 0 51.2-23.04 51.2-51.2 0-7.68-2.56-15.36-5.12-23.04l-33.28-66.56z" fill="#A5C8F4"></path>
-                <path d="M307.2 358.4c-43.52 0-76.8-33.28-76.8-76.8s33.28-76.8 76.8-76.8 76.8 33.28 76.8 76.8-33.28 76.8-76.8 76.8z m327.68-33.28c5.12-7.68 12.8-15.36 20.48-17.92 25.6-12.8 56.32 0 69.12 23.04L944.64 793.6c2.56 7.68 5.12 15.36 5.12 23.04 0 28.16-23.04 51.2-51.2 51.2H378.88c-10.24 0-20.48-2.56-30.72-10.24-23.04-15.36-28.16-48.64-12.8-71.68l56.32-79.36 243.2-381.44z" fill="#2589FF"></path>
-              </svg>
-            </div>
-          </div>
-
-          <div class="text-area"><span>也可直接截图并粘贴到这里</span></div>
-
-          <div class="upload-btn-area">
-            <input id="upFiles" name="Files" type="file" data-role="file-input" />
-            <label class="btn-upload" for="upFiles">选择上传图片或视频</label>
-          </div>
-        </div>
-
-        <div class="telegraph-area uploading" data-state="uploading" hidden>
-          <div class="svg-wrapper flex">
-            <div class="svg-box">
-              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="upload-icon">
-                <path d="M554.666667 268.8v601.6h-85.333334V268.8L337.066667 401.066667 277.333333 341.333333 512 106.666667 746.666667 341.333333l-59.733334 59.733334L554.666667 268.8z" fill="#0075ff"></path>
-              </svg>
-            </div>
-          </div>
-          <div class="text-area"><span data-role="uploading-message">正在上传，请稍等…</span></div>
-        </div>
-
-        <div class="telegraph-area done" data-state="done" hidden>
-          <div class="svg-wrapper flex">
-            <div class="svg-box">
-              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="upload-icon">
-                <path d="M392.533333 806.4L85.333333 503.466667l59.733334-59.733334 247.466666 247.466667L866.133333 213.333333l59.733334 59.733334L392.533333 806.4z" fill="#0075ff"></path>
-              </svg>
-            </div>
-          </div>
-          <div class="text-area"><span data-role="done-message">复制下面的图片地址 或者 取消重新上传</span></div>
-          <div class="url-box">
-            <div class="copy-url">
-              <div class="input-group">
-                <input readonly id="url-content" class="input-sm" data-role="result-input" />
-                <button type="button" class="input-group-button" data-action="copy">复制</button>
-              </div>
-              <button type="button" class="re-upload" data-action="clear" title="重新上传" aria-label="重新上传">
-                <svg height="26" viewBox="0 0 1024 1024" width="26" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M396.8 200.533333l64 64L384 341.333333h298.666667c119.466667 0 213.333333 93.866667 213.333333 213.333334s-93.866667 213.333333-213.333333 213.333333H298.666667v-85.333333h384c72.533333 0 128-55.466667 128-128s-55.466667-128-128-128H170.666667l226.133333-226.133334z" fill="#d73a49"></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="telegraph-area error" data-state="error" hidden>
-          <div class="svg-wrapper flex">
-            <div class="svg-box">
-              <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="upload-icon">
-                <path d="M809.222867 150.531412 868.688213 210.004945 568.397986 510.292102 868.688213 810.587446 809.222867 870.055862 508.93264 569.771775 208.644459 870.055862 149.169903 810.587446 449.461153 510.292102 149.169903 210.004945 208.644459 150.531412 508.93264 450.823686Z" fill="#d81e06"></path>
-              </svg>
-            </div>
-          </div>
-          <div class="text-area"><span data-role="error-message">出错啦，请重新上传</span></div>
-        </div>
+    <div class="telegraph-hero-card">
+      <span class="telegraph-eyebrow">Telegraph-style image host</span>
+      <div class="telegraph-title">{title}</div>
+      <p class="telegraph-copy">
+        首页不再直接上传。请使用右上角进入 <code>/admin</code>，或通过 WebDAV 挂载来浏览、整理和管理文件。
+      </p>
+      <div class="telegraph-meta-row">
+        <span>背景轮播保留</span>
+        <span>右上角可直达管理台</span>
+        <span>适合 WebDAV / Admin 双入口</span>
       </div>
     </div>
-
-    <div class="telegraph-footer">基于 Telegraph 的图片上传工具</div>
   </div>
 </section>
 
 <script is:inline>
 (() => {
   const init = () => {
-    document.querySelectorAll('[data-upload-app]').forEach((root) => {
+    document.querySelectorAll('[data-landing-app]').forEach((root) => {
       if (root.dataset.bound === 'true') return;
       root.dataset.bound = 'true';
 
-      const wrapper = root.querySelector('[data-role="wrapper"]');
-      const fileInput = root.querySelector('[data-role="file-input"]');
-      const resultInput = root.querySelector('[data-role="result-input"]');
-      const doneMessage = root.querySelector('[data-role="done-message"]');
-      const uploadingMessage = root.querySelector('[data-role="uploading-message"]');
-      const errorMessage = root.querySelector('[data-role="error-message"]');
-      const dropzone = root.querySelector('[data-role="dropzone"]');
       const backgroundSlider = root.querySelector('[data-role="background-slider"]');
-      const markdownDefault = root.dataset.markdownDefault === 'true';
-      const areas = new Map(
-        [...root.querySelectorAll('[data-state]')].map((node) => [node.dataset.state, node])
-      );
-
-      let currentUrl = '';
-      let useMarkdown = markdownDefault;
-      let errorTimer;
-
-      const showState = (state) => {
-        wrapper.className = `telegraph-wrapper ${state}`;
-        areas.forEach((node, key) => {
-          node.hidden = key !== state;
-        });
-      };
-
-      const renderResult = () => {
-        const value = useMarkdown ? `![](${currentUrl})` : currentUrl;
-        resultInput.value = value;
-        doneMessage.textContent = useMarkdown
-          ? '复制下面的 Markdown 地址 或者 取消重新上传'
-          : '复制下面的图片地址 或者 取消重新上传';
-      };
-
-      const resetToWaiting = () => {
-        clearTimeout(errorTimer);
-        currentUrl = '';
-        fileInput.value = '';
-        errorMessage.textContent = '出错啦，请重新上传';
-        uploadingMessage.textContent = '正在上传，请稍等…';
-        showState('waitting');
-      };
-
-      const showError = (message) => {
-        errorMessage.textContent = message || '出错啦，请重新上传';
-        showState('error');
-        clearTimeout(errorTimer);
-        errorTimer = setTimeout(resetToWaiting, 2200);
-      };
-
-      const upload = async (file) => {
-        if (!file) return;
-        const body = new FormData();
-        body.append('file', file, file.name || 'upload.bin');
-        uploadingMessage.textContent = `正在上传 ${file.name || '文件'}，请稍等…`;
-        showState('uploading');
-
-        try {
-          const response = await fetch('/upload', {
-            method: 'POST',
-            body
-          });
-          const payload = await response.json().catch(() => null);
-          if (!response.ok) {
-            throw new Error(payload?.error || '出错啦，请重新上传');
-          }
-
-          currentUrl = new URL(payload?.[0]?.src || '', window.location.origin).toString();
-          renderResult();
-          showState('done');
-        } catch (error) {
-          showError(error instanceof Error ? error.message : '出错啦，请重新上传');
-        }
-      };
-
-      fileInput.addEventListener('change', () => {
-        const [file] = fileInput.files || [];
-        void upload(file);
-      });
-
-      root.querySelector('[data-action="copy"]').addEventListener('click', async () => {
-        if (!resultInput.value) return;
-        try {
-          await navigator.clipboard.writeText(resultInput.value);
-          doneMessage.textContent = useMarkdown ? '已成功复制 Markdown 地址!' : '已成功复制图片地址!';
-        } catch {
-          resultInput.focus();
-          resultInput.select();
-          doneMessage.textContent = '浏览器阻止了自动复制，请手动复制';
-        }
-      });
-
-      root.querySelector('[data-action="clear"]').addEventListener('click', resetToWaiting);
-
-      document.addEventListener('paste', (event) => {
-        const file = [...(event.clipboardData?.files || [])][0];
-        if (file) {
-          void upload(file);
-        }
-      });
-
-      dropzone.addEventListener('dragover', (event) => {
-        event.preventDefault();
-        dropzone.classList.add('dragover');
-      });
-
-      dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('dragover');
-      });
-
-      dropzone.addEventListener('drop', (event) => {
-        event.preventDefault();
-        dropzone.classList.remove('dragover');
-        const [file] = [...(event.dataTransfer?.files || [])];
-        if (file) {
-          void upload(file);
-        }
-      });
-
-      if (backgroundSlider && !backgroundSlider.dataset.loaded) {
-        backgroundSlider.dataset.loaded = 'true';
-        fetch('/api/bing/wallpaper')
-          .then((response) => response.json())
-          .then((payload) => {
-            const images = (payload?.data || []).slice(0, 5).map((item) => {
-              return item?.url?.startsWith('http') ? item.url : `https://cn.bing.com${item?.url || ''}`;
-            }).filter(Boolean);
-            if (!images.length) return;
-
-            let index = 0;
-            backgroundSlider.style.backgroundImage = `url("${images[0]}")`;
-            backgroundSlider.classList.add('is-loaded');
-
-            if (images.length > 1) {
-              window.setInterval(() => {
-                index = (index + 1) % images.length;
-                backgroundSlider.classList.remove('is-visible');
-                window.setTimeout(() => {
-                  backgroundSlider.style.backgroundImage = `url("${images[index]}")`;
-                  backgroundSlider.classList.add('is-visible');
-                }, 220);
-              }, 8000);
-            }
-
-            backgroundSlider.classList.add('is-visible');
-          })
-          .catch(() => {
-            backgroundSlider.style.backgroundImage = '';
-          });
+      if (!backgroundSlider || backgroundSlider.dataset.loaded) {
+        return;
       }
 
-      showState('waitting');
+      backgroundSlider.dataset.loaded = 'true';
+      fetch('/api/bing/wallpaper')
+        .then((response) => response.json())
+        .then((payload) => {
+          const images = (payload?.data || []).slice(0, 5).map((item) => {
+            return item?.url?.startsWith('http') ? item.url : `https://cn.bing.com${item?.url || ''}`;
+          }).filter(Boolean);
+          if (!images.length) return;
+
+          let index = 0;
+          backgroundSlider.style.backgroundImage = `url("${images[0]}")`;
+          backgroundSlider.classList.add('is-loaded', 'is-visible');
+
+          if (images.length > 1) {
+            window.setInterval(() => {
+              index = (index + 1) % images.length;
+              backgroundSlider.classList.remove('is-visible');
+              window.setTimeout(() => {
+                backgroundSlider.style.backgroundImage = `url("${images[index]}")`;
+                backgroundSlider.classList.add('is-visible');
+              }, 220);
+            }, 8000);
+          }
+        })
+        .catch(() => {
+          backgroundSlider.style.backgroundImage = '';
+        });
     });
   };
 
@@ -334,218 +155,86 @@ const {
   }
 
   .telegraph-main {
-    display: flex;
-    flex: 1;
+    display: grid;
     min-height: calc(100vh - 60px);
-    flex-direction: column;
-    align-items: center;
+    place-items: center;
     padding: 30px 0;
+  }
+
+  .telegraph-hero-card {
+    width: min(640px, calc(100vw - 48px));
+    padding: 36px 34px;
+    border-radius: 28px;
+    background: rgba(8, 8, 8, 0.52);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(18px);
+    color: #fff;
+    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.3);
+  }
+
+  .telegraph-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .telegraph-title {
     font-family: "阿里妈妈数黑体 Bold", Inter, system-ui, sans-serif;
     color: #fff;
-    font-size: 24px;
+    font-size: clamp(40px, 8vw, 72px);
     font-weight: 700;
-    padding: 30px 0 10px;
+    line-height: 1.02;
+    padding: 18px 0 14px;
   }
 
-  .telegraph-upload-main {
-    width: 314px;
-    height: 370px;
-    opacity: 0.8;
-    transition: opacity 0.2s ease;
+  .telegraph-copy {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.78);
   }
 
-  .telegraph-upload-main:hover {
-    opacity: 1;
+  .telegraph-copy code {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
   }
 
-  .telegraph-wrapper,
-  .telegraph-area,
-  .copy-url,
-  .input-group-button,
-  .re-upload,
-  .flex {
+  .telegraph-meta-row {
     display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  .telegraph-meta-row span {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-  }
-
-  .telegraph-wrapper {
-    width: 100%;
-    height: 100%;
-    max-width: 314px;
-    flex-direction: column;
-    background: #fff url(/bg.svg);
-    background-size: 110%;
-    background-repeat: no-repeat;
-    background-position: top;
-    border-radius: 3px;
-    box-shadow: 0 0 32px 0 rgba(12, 12, 13, 0.1), 0 2px 16px 0 rgba(12, 12, 13, 0.05);
-    color: #5e6878;
-    font-size: 14px;
-  }
-
-  .telegraph-area {
-    width: 100%;
-    height: 100%;
-    flex-direction: column;
-  }
-
-  .telegraph-area[hidden] {
-    display: none !important;
-  }
-
-  .svg-wrapper {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    position: relative;
-    border: 4px solid #c7cfd7;
-    transition: border-color 0.2s ease;
-  }
-
-  .svg-wrapper.dragover {
-    border-color: #0297f8;
-  }
-
-  .svg-wrapper::before {
-    content: " ";
-    position: absolute;
-    width: calc(100% + 2px);
-    height: calc(100% + 2px);
-    top: -1px;
-    left: -1px;
-    border-radius: 50%;
-  }
-
-  .waitting .svg-wrapper::before {
-    animation: telegraphPulse 1.5s linear infinite;
-  }
-
-  .svg-box {
-    position: absolute;
-    width: 60px;
-    height: 60px;
-    padding: 10px;
-    overflow: hidden;
-    border-radius: 50%;
-  }
-
-  .upload-icon {
-    width: 100%;
-    height: 100%;
-  }
-
-  .uploading .upload-icon {
-    animation: telegraphUpload 1s linear infinite;
-  }
-
-  .text-area {
-    padding: 50px 0 10px;
-    font-size: 12px;
-    text-align: center;
-  }
-
-  .upload-btn-area input {
-    display: none;
-  }
-
-  .btn-upload {
-    background-color: #0297f8;
-    border-radius: 40px;
-    display: inline-block;
-    color: #fff;
-    font-weight: 700;
-    padding: 8px 30px;
-    cursor: pointer;
-    transition: opacity 0.2s ease, background-color 0.2s ease;
-  }
-
-  .btn-upload:hover {
-    opacity: 0.8;
-    background-color: rgba(2, 151, 248, 0.85);
-  }
-
-  .url-box {
-    height: 43px;
-    width: 80%;
-    margin-top: 15px;
-  }
-
-  .copy-url {
-    width: 100%;
-    padding-left: 20px;
-  }
-
-  .input-group {
-    display: flex;
-    flex: 1;
-    border: 1px solid #d1d5da;
-    border-radius: 3px;
-    box-shadow: inset 0 1px 2px rgba(27, 31, 35, 0.075);
-  }
-
-  .input-sm {
-    flex: 1;
-    outline: 0;
-    font-size: 12px;
-    line-height: 20px;
-    padding: 3px 5px;
-    border: none;
-    background: transparent;
-    color: #24292e;
-  }
-
-  .input-group-button {
-    padding: 0 8px;
-    background-color: #eff3f6;
-    background-image: linear-gradient(-180deg, #fafbfc, #eff3f6 90%);
-    color: #24292e;
-    cursor: pointer;
-    border: none;
-    border-left: 1px solid #d1d5da;
-  }
-
-  .input-group-button:hover {
-    background-color: #e6ebf1;
-    background-image: linear-gradient(-180deg, #f0f3f6, #e6ebf1 90%);
-    border-color: rgba(27, 31, 35, 0.35);
-  }
-
-  .re-upload {
-    cursor: pointer;
-    padding: 0 5px;
-    border: none;
-    background: transparent;
-  }
-
-  .telegraph-footer {
-    font-size: 12px;
-    color: #fff;
-    margin-top: 28px;
-  }
-
-  @keyframes telegraphUpload {
-    0% { transform: translateY(100%); }
-    100% { transform: translateY(-100%); }
-  }
-
-  @keyframes telegraphPulse {
-    0% {
-      transform: scale(1);
-      border: 1px solid #c7cfd7;
-    }
-    100% {
-      transform: scale(1.5);
-      border: 1px solid rgba(199, 207, 215, 0.1);
-    }
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
   }
 
   @media (max-width: 520px) {
     .telegraph-page {
       padding: 18px;
+    }
+
+    .telegraph-hero-card {
+      width: min(100%, calc(100vw - 24px));
+      padding: 28px 22px;
+      border-radius: 22px;
     }
   }
 </style>

@@ -380,7 +380,7 @@ describe('WebDAV route', () => {
   it('suppresses tombstoned DAV paths even if stale storage metadata is still visible', async () => {
     const storageKey = 'BQACAgEAAyEGAASOZ3wkAAMtaft6F-ANezHGnmd2H_6l17axrzwAAqMIAAK9l9hHzOJE85QPWYM7BA.txt';
     const path = '/dav-inspect-1778088468.txt';
-    const tombstoneAt = 1778091607465;
+    const tombstoneAt = Date.now();
     const env = {
       img_url: createKv({
         [storageKey]: {
