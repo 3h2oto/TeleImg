@@ -16,7 +16,7 @@ import { json, methodNotAllowed, serviceUnavailable, text } from '../_lib/http.j
 import { getRuntimeConfig } from '../_lib/runtime-config.js';
 import { uploadFileToTelegram } from '../_lib/telegram-upload.js';
 
-const DAV_ALLOW = 'OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE';
+const DAV_ALLOW = 'OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY';
 
 function xmlEscape(value) {
   return String(value ?? '')
@@ -93,6 +93,58 @@ async function deleteDavTree(env, entry) {
   await deleteDavEntry(env, entry.path);
 }
 
+async function copyDavTree(env, config, requestUrl, entry, targetPath) {
+  if (entry.kind === 'collection') {
+    await ensureDavCollections(env, targetPath);
+    await putDavEntry(env, targetPath, {
+      kind: 'collection',
+      createdAt: Date.now()
+    });
+
+    const children = await listDavChildren(env, entry.path);
+    for (const child of children) {
+      const childTargetPath = `${targetPath}/${getDavBaseName(child.path)}`;
+      await copyDavTree(env, config, requestUrl, child, childTargetPath);
+    }
+    return;
+  }
+
+  const sourceUrl = new URL(`/file/${encodeURIComponent(entry.storageKey)}`, requestUrl.origin);
+  const sourceResponse = await fetch(sourceUrl, {
+    method: 'GET',
+    headers: {
+      accept: '*/*',
+      'x-teleimg-admin-preview': '1'
+    }
+  });
+
+  if (!sourceResponse.ok) {
+    throw new Error(`Failed to read source file ${entry.path}: ${sourceResponse.status}.`);
+  }
+
+  const body = await sourceResponse.arrayBuffer();
+  const contentType = entry.contentType || sourceResponse.headers.get('content-type') || 'application/octet-stream';
+  const fileName = getDavBaseName(targetPath) || 'copy.bin';
+  const file = new File([body], fileName, { type: contentType });
+  const upload = await uploadFileToTelegram(env, config, file, {
+    fileName,
+    source: 'webdav-copy'
+  });
+
+  if (!upload.success) {
+    throw new Error(upload.error || `Failed to copy ${entry.path}.`);
+  }
+
+  await ensureDavCollections(env, targetPath);
+  await putDavEntry(env, targetPath, {
+    kind: 'file',
+    storageKey: upload.key,
+    size: upload.metadata.fileSize,
+    contentType,
+    createdAt: Date.now()
+  });
+}
+
 async function proxyFileRequest(request, requestUrl, storageKey) {
   const proxyUrl = new URL(`/file/${encodeURIComponent(storageKey)}`, requestUrl.origin);
   const headers = new Headers();
@@ -113,6 +165,14 @@ async function proxyFileRequest(request, requestUrl, storageKey) {
 function resolveDavPath(request) {
   const url = new URL(request.url);
   return normalizeDavPath(url.pathname, '/dav');
+}
+
+function resolveDestinationPath(destination, requestUrl) {
+  const destinationUrl = new URL(destination, requestUrl);
+  if (destinationUrl.origin !== requestUrl.origin || !destinationUrl.pathname.startsWith('/dav')) {
+    throw new Error('Destination must stay within /dav.');
+  }
+  return normalizeDavPath(destinationUrl.pathname, '/dav');
 }
 
 export async function onRequest(context) {
@@ -289,20 +349,88 @@ export async function onRequest(context) {
       return text('Missing Destination header.', { status: 400, headers: davHeaders() });
     }
 
+    const overwrite = (context.request.headers.get('overwrite') || 'T').toUpperCase() !== 'F';
     let destinationPath;
     try {
-      const destinationUrl = new URL(destination, requestUrl);
-      if (destinationUrl.origin !== requestUrl.origin || !destinationUrl.pathname.startsWith('/dav')) {
-        return text('Destination must stay within /dav.', { status: 400, headers: davHeaders() });
-      }
-      destinationPath = normalizeDavPath(destinationUrl.pathname, '/dav');
-    } catch {
-      return text('Invalid Destination header.', { status: 400, headers: davHeaders() });
+      destinationPath = resolveDestinationPath(destination, requestUrl);
+    } catch (error) {
+      return text(error instanceof Error ? error.message : 'Invalid Destination header.', { status: 400, headers: davHeaders() });
+    }
+
+    const sourceEntry = await getDavEntry(context.env, davPath);
+    if (!sourceEntry) {
+      return text('Not found.', { status: 404, headers: davHeaders() });
+    }
+
+    const destinationEntry = await getDavEntry(context.env, destinationPath);
+    if (destinationEntry && !overwrite) {
+      return text('Destination already exists.', { status: 412, headers: davHeaders() });
+    }
+    if (destinationEntry && overwrite) {
+      await deleteDavTree(context.env, destinationEntry);
+    }
+
+    if (sourceEntry.kind === 'collection' && destinationPath.startsWith(`${davPath}/`)) {
+      return text('Cannot move a collection inside itself.', { status: 409, headers: davHeaders() });
     }
 
     const moved = await moveDavTree(context.env, davPath, destinationPath);
     if (!moved.success) {
       return text(moved.error, { status: moved.status || 500, headers: davHeaders() });
+    }
+
+    return new Response(null, { status: 201, headers: davHeaders() });
+  }
+
+  if (method === 'COPY') {
+    if (davPath === '/') {
+      return text('Cannot copy root collection.', { status: 405, headers: davHeaders() });
+    }
+
+    const sourceEntry = await getDavEntry(context.env, davPath);
+    if (!sourceEntry) {
+      return text('Not found.', { status: 404, headers: davHeaders() });
+    }
+
+    const destination = context.request.headers.get('destination');
+    if (!destination) {
+      return text('Missing Destination header.', { status: 400, headers: davHeaders() });
+    }
+
+    const overwrite = (context.request.headers.get('overwrite') || 'T').toUpperCase() !== 'F';
+    let destinationPath;
+    try {
+      destinationPath = resolveDestinationPath(destination, requestUrl);
+    } catch (error) {
+      return text(error instanceof Error ? error.message : 'Invalid Destination header.', { status: 400, headers: davHeaders() });
+    }
+
+    if (destinationPath === davPath) {
+      return text('Cannot copy onto the same path.', { status: 409, headers: davHeaders() });
+    }
+
+    if (sourceEntry.kind === 'collection' && destinationPath.startsWith(`${davPath}/`)) {
+      return text('Cannot copy a collection inside itself.', { status: 409, headers: davHeaders() });
+    }
+
+    const destinationEntry = await getDavEntry(context.env, destinationPath);
+    if (destinationEntry && !overwrite) {
+      return text('Destination already exists.', { status: 412, headers: davHeaders() });
+    }
+
+    if (destinationEntry && overwrite) {
+      await deleteDavTree(context.env, destinationEntry);
+    }
+
+    const config = await getRuntimeConfig(context.env);
+    if (!config.TG_Bot_Token || !config.TG_Chat_ID) {
+      return serviceUnavailable('TG_Bot_Token and TG_Chat_ID must be configured before WebDAV COPY can work.');
+    }
+
+    try {
+      await copyDavTree(context.env, config, requestUrl, sourceEntry, destinationPath);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Copy failed.' }, { status: 502, headers: davHeaders() });
     }
 
     return new Response(null, { status: 201, headers: davHeaders() });

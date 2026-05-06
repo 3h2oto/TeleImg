@@ -252,6 +252,7 @@ Currently supported:
 - `DELETE`
 - `MKCOL`
 - `MOVE`
+- `COPY`
 
 Implementation notes:
 
@@ -285,4 +286,3 @@ Authenticate with:
 
 - this is a Linux-first MVP, not a Finder / Windows Explorer compatibility exercise
 - single-range only, not multi-range
-- `COPY` is not implemented yet

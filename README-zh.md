@@ -252,6 +252,7 @@ npm run mtproto:worker:deploy -- --dry-run
 - `DELETE`
 - `MKCOL`
 - `MOVE`
+- `COPY`
 
 实现说明：
 
@@ -285,4 +286,3 @@ sudo mount -t davfs https://img.vicco.eu.org/dav/ /mnt/teleimg
 
 - 这是 Linux 优先的 MVP，不追求 Finder / Windows Explorer 的原生兼容怪癖
 - 目前是单 Range 支持，不是 multi-range
-- 还没有实现 `COPY`
