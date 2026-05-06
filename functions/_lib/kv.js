@@ -48,20 +48,21 @@ function normalizeUploader(uploader) {
 
 function normalizeTelegramMetadata(telegram, metadata = {}) {
   const source = telegram && typeof telegram === 'object' ? telegram : {};
+  const fallback = metadata && typeof metadata === 'object' ? metadata : {};
 
   const normalized = {
-    chatId: source.chatId != null ? String(source.chatId) : (metadata.telegramChatId != null ? String(metadata.telegramChatId) : ''),
-    chatTitle: sanitizeText(source.chatTitle || metadata.telegramChatTitle),
-    chatType: sanitizeText(source.chatType || metadata.telegramChatType),
-    messageId: Number.isFinite(source.messageId) ? source.messageId : (Number.isFinite(metadata.telegramMessageId) ? metadata.telegramMessageId : undefined),
-    updateId: Number.isFinite(source.updateId) ? source.updateId : (Number.isFinite(metadata.telegramUpdateId) ? metadata.telegramUpdateId : undefined),
-    fileId: sanitizeText(source.fileId || metadata.telegramFileId),
-    fileUniqueId: sanitizeText(source.fileUniqueId || metadata.telegramFileUniqueId),
-    mediaKind: sanitizeText(source.mediaKind || metadata.telegramMediaKind),
-    mediaGroupId: sanitizeText(source.mediaGroupId || metadata.telegramMediaGroupId),
-    date: Number.isFinite(source.date) ? source.date : (Number.isFinite(metadata.telegramDate) ? metadata.telegramDate : undefined),
-    source: sanitizeText(source.source || metadata.telegramSource),
-    viaWebhook: source.viaWebhook !== undefined ? Boolean(source.viaWebhook) : Boolean(metadata.telegramViaWebhook)
+    chatId: source.chatId != null ? String(source.chatId) : (fallback.telegramChatId != null ? String(fallback.telegramChatId) : ''),
+    chatTitle: sanitizeText(source.chatTitle || fallback.telegramChatTitle),
+    chatType: sanitizeText(source.chatType || fallback.telegramChatType),
+    messageId: Number.isFinite(source.messageId) ? source.messageId : (Number.isFinite(fallback.telegramMessageId) ? fallback.telegramMessageId : undefined),
+    updateId: Number.isFinite(source.updateId) ? source.updateId : (Number.isFinite(fallback.telegramUpdateId) ? fallback.telegramUpdateId : undefined),
+    fileId: sanitizeText(source.fileId || fallback.telegramFileId),
+    fileUniqueId: sanitizeText(source.fileUniqueId || fallback.telegramFileUniqueId),
+    mediaKind: sanitizeText(source.mediaKind || fallback.telegramMediaKind),
+    mediaGroupId: sanitizeText(source.mediaGroupId || fallback.telegramMediaGroupId),
+    date: Number.isFinite(source.date) ? source.date : (Number.isFinite(fallback.telegramDate) ? fallback.telegramDate : undefined),
+    source: sanitizeText(source.source || fallback.telegramSource),
+    viaWebhook: source.viaWebhook !== undefined ? Boolean(source.viaWebhook) : Boolean(fallback.telegramViaWebhook)
   };
 
   if (!normalized.chatId && !normalized.fileId && !normalized.messageId) {
@@ -159,8 +160,13 @@ function matchesSearch(entry, search) {
   return haystacks.some((value) => value.includes(search));
 }
 
-function enrichKey(entry) {
-  const metadata = normalizeMetadata(entry.name, entry.metadata);
+async function enrichKey(env, entry) {
+  const fresh = await env.img_url.getWithMetadata(entry.name).catch(() => null);
+  if (!fresh) {
+    return null;
+  }
+
+  const metadata = normalizeMetadata(entry.name, fresh.metadata ?? entry.metadata);
   return {
     ...entry,
     metadata,
@@ -186,12 +192,17 @@ export async function listRecords(env, { limit = 100, cursor, prefix, search } =
     currentCursor = page.cursor;
     scanned += page.keys.length;
 
-    for (const entry of page.keys) {
-      if (isInternalKey(entry.name)) {
+    const enrichedEntries = await Promise.all(page.keys.map((entry) => enrichKey(env, entry)));
+
+    for (const enriched of enrichedEntries) {
+      if (!enriched) {
         continue;
       }
 
-      const enriched = enrichKey(entry);
+      if (isInternalKey(enriched.name)) {
+        continue;
+      }
+
       if (matchesSearch(enriched, normalizedSearch)) {
         matches.push(enriched);
         if (matches.length >= safeLimit) {

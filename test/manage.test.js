@@ -77,6 +77,40 @@ describe('manage endpoints', () => {
     expect(payload.keys[0].name).toBe('one.png');
   });
 
+  it('prefers fresh getWithMetadata over stale list metadata', async () => {
+    const env = {
+      img_url: createKv({
+        'one.png': {
+          fileName: 'fresh-name.png',
+          TimeStamp: 2
+        }
+      })
+    };
+
+    const originalList = env.img_url.list.bind(env.img_url);
+    env.img_url.list = async (options = {}) => {
+      const page = await originalList(options);
+      return {
+        ...page,
+        keys: page.keys.map((entry) => ({
+          ...entry,
+          metadata: entry.name === 'one.png'
+            ? { ...(entry.metadata || {}), fileName: 'stale-name.png', TimeStamp: 1 }
+            : entry.metadata
+        }))
+      };
+    };
+
+    const response = await list({
+      env,
+      request: new Request('https://example.com/api/manage/list?search=fresh-name')
+    });
+
+    const payload = await response.json();
+    expect(payload.keys).toHaveLength(1);
+    expect(payload.keys[0].metadata.fileName).toBe('fresh-name.png');
+  });
+
   it('syncs Telegram direct uploads into KV records', async () => {
     const env = { img_url: createKv() };
     const summary = await processTelegramUpdates(env, [{
