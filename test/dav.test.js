@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { onRequest } from '../functions/dav/[[path]].js';
 import { listRecords } from '../functions/_lib/kv.js';
-import { getDavEntryKey } from '../functions/_lib/dav.js';
+import { getDavEntryKey, getDavTombstoneKey } from '../functions/_lib/dav.js';
 import { createKv } from './helpers.js';
 
 const originalFetch = global.fetch;
@@ -375,5 +375,65 @@ describe('WebDAV route', () => {
     expect(rootBody).not.toContain('/dav/dav-http-probe-1778087990.txt');
     expect(await env.img_url.getWithMetadata(storageKey)).toBeNull();
     expect(await env.img_url.get(getDavEntryKey(ghostPath))).toBeNull();
+  });
+
+  it('suppresses tombstoned DAV paths even if stale storage metadata is still visible', async () => {
+    const storageKey = 'BQACAgEAAyEGAASOZ3wkAAMtaft6F-ANezHGnmd2H_6l17axrzwAAqMIAAK9l9hHzOJE85QPWYM7BA.txt';
+    const path = '/dav-inspect-1778088468.txt';
+    const tombstoneAt = 1778091607465;
+    const env = {
+      img_url: createKv({
+        [storageKey]: {
+          fileName: 'dav-inspect-1778088468.txt',
+          fileSize: 17,
+          TimeStamp: 1778088471584,
+          source: 'web-upload',
+          telegram: {
+            chatId: '-10001',
+            messageId: 45,
+            fileId: storageKey.replace(/\.txt$/, '')
+          }
+        },
+        [getDavEntryKey(path)]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path,
+            name: 'dav-inspect-1778088468.txt',
+            storageKey,
+            size: 17,
+            contentType: 'text/plain',
+            createdAt: 1778088471584,
+            updatedAt: 1778091607465
+          })
+        },
+        [getDavTombstoneKey(path)]: {
+          value: JSON.stringify({
+            path,
+            createdAt: tombstoneAt,
+            expiresAt: tombstoneAt + 15 * 60 * 1000
+          })
+        }
+      })
+    };
+
+    const exactResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/dav-inspect-1778088468.txt', {
+        method: 'PROPFIND',
+        headers: { depth: '0' }
+      })
+    });
+    expect(exactResponse.status).toBe(404);
+
+    const rootResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+    expect(rootResponse.status).toBe(207);
+    const rootBody = await rootResponse.text();
+    expect(rootBody).not.toContain('/dav/dav-inspect-1778088468.txt');
   });
 });

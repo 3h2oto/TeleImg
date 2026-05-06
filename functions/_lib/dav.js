@@ -2,6 +2,8 @@ import { INTERNAL_KEY_PREFIX, isInternalKey, normalizeMetadata, readInternalJson
 import { isTelegramFileKey } from './telegram.js';
 
 export const DAV_ENTRY_PREFIX = `${INTERNAL_KEY_PREFIX}dav/entries`;
+export const DAV_TOMBSTONE_PREFIX = `${INTERNAL_KEY_PREFIX}dav/tombstones`;
+const DAV_TOMBSTONE_TTL_MS = 15 * 60 * 1000;
 
 function escapeSegment(segment) {
   return segment.replace(/\\/g, '/');
@@ -26,6 +28,10 @@ export function normalizeDavPath(pathname, basePath = '/dav') {
 
 export function getDavEntryKey(davPath) {
   return davPath === '/' ? `${DAV_ENTRY_PREFIX}/` : `${DAV_ENTRY_PREFIX}${davPath}`;
+}
+
+export function getDavTombstoneKey(davPath) {
+  return davPath === '/' ? `${DAV_TOMBSTONE_PREFIX}/` : `${DAV_TOMBSTONE_PREFIX}${davPath}`;
 }
 
 export function getDavParentPath(davPath) {
@@ -110,6 +116,27 @@ async function loadStorageRecord(env, storageKey, cache) {
   return normalized;
 }
 
+async function loadDavTombstone(env, davPath, cache) {
+  if (!davPath || davPath === '/') {
+    return null;
+  }
+
+  if (cache?.has(davPath)) {
+    return cache.get(davPath);
+  }
+
+  const tombstone = await readInternalJson(env, getDavTombstoneKey(davPath));
+  const normalized = tombstone && typeof tombstone === 'object' ? tombstone : null;
+  if (normalized?.expiresAt && normalized.expiresAt <= Date.now()) {
+    await env.img_url.delete(getDavTombstoneKey(davPath));
+    cache?.set(davPath, null);
+    return null;
+  }
+
+  cache?.set(davPath, normalized);
+  return normalized;
+}
+
 function isGhostDavBackingRecord(davPath, storageKey, metadata) {
   if (!storageKey || !metadata || !isTelegramFileKey(storageKey)) {
     return false;
@@ -120,6 +147,15 @@ function isGhostDavBackingRecord(davPath, storageKey, metadata) {
     && metadata.source === 'unknown'
     && Number(metadata.fileSize || 0) === 0
     && !metadata.telegram;
+}
+
+function shouldSuppressDavPath(tombstone, metadata, fallbackUpdatedAt = 0) {
+  if (!tombstone?.createdAt) {
+    return false;
+  }
+
+  const recordVersion = Number(metadata?.TimeStamp || fallbackUpdatedAt || 0);
+  return recordVersion <= Number(tombstone.createdAt);
 }
 
 function pickPreferredAlias(current, candidate, preferredFileName = '') {
@@ -193,6 +229,12 @@ export async function getDavEntry(env, davPath) {
       await deleteDavEntry(env, davPath);
       return null;
     }
+
+    const tombstone = await loadDavTombstone(env, davPath);
+    if (shouldSuppressDavPath(tombstone, metadata, entry.updatedAt)) {
+      await deleteDavEntry(env, davPath);
+      return null;
+    }
   }
 
   return entry;
@@ -219,6 +261,20 @@ export async function deleteDavEntry(env, davPath) {
     return;
   }
   await env.img_url.delete(getDavEntryKey(davPath));
+}
+
+export async function putDavTombstone(env, davPath, { createdAt = Date.now(), ttlMs = DAV_TOMBSTONE_TTL_MS } = {}) {
+  if (!davPath || davPath === '/') {
+    return null;
+  }
+
+  const normalized = {
+    path: davPath,
+    createdAt,
+    expiresAt: createdAt + ttlMs
+  };
+  await writeInternalJson(env, getDavTombstoneKey(davPath), normalized);
+  return normalized;
 }
 
 export async function ensureDavCollections(env, davPath) {
@@ -313,6 +369,7 @@ export async function listAllDavEntries(env) {
 export async function materializeProjectedDavEntries(env) {
   const existingEntries = await listAllDavEntries(env);
   const recordCache = new Map();
+  const tombstoneCache = new Map();
   const stalePaths = new Set();
   const ghostStorageKeys = new Set();
   const dedupedEntries = [];
@@ -338,6 +395,12 @@ export async function materializeProjectedDavEntries(env) {
     if (isGhostDavBackingRecord(entry.path, entry.storageKey, record.metadata)) {
       stalePaths.add(entry.path);
       ghostStorageKeys.add(entry.storageKey);
+      continue;
+    }
+
+    const entryTombstone = await loadDavTombstone(env, entry.path, tombstoneCache);
+    if (shouldSuppressDavPath(entryTombstone, record.metadata, entry.updatedAt)) {
+      stalePaths.add(entry.path);
       continue;
     }
 
@@ -400,6 +463,11 @@ export async function materializeProjectedDavEntries(env) {
 
   for (const record of records) {
     let candidate = `/${record.fileName}`;
+    const directTombstone = await loadDavTombstone(env, candidate, tombstoneCache);
+    if (shouldSuppressDavPath(directTombstone, { TimeStamp: record.updatedAt })) {
+      continue;
+    }
+
     if (occupiedPaths.has(candidate)) {
       let nextName = appendStableSuffix(record.fileName, record.storageKey);
       candidate = `/${nextName}`;
@@ -477,6 +545,7 @@ export async function moveDavTree(env, fromPath, toPath) {
   }
 
   for (const item of replacements) {
+    await putDavTombstone(env, item.oldPath);
     await deleteDavEntry(env, item.oldPath);
   }
 

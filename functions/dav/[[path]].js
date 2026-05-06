@@ -11,6 +11,7 @@ import {
   materializeProjectedDavEntries,
   moveDavTree,
   normalizeDavPath,
+  putDavTombstone,
   putDavEntry,
   renameDavBackedFile
 } from '../_lib/dav.js';
@@ -81,6 +82,7 @@ async function deleteDavTree(env, entry) {
         await deleteDavTree(env, child);
       }
     }
+    await putDavTombstone(env, entry.path);
     await deleteDavEntry(env, entry.path);
     return;
   }
@@ -92,6 +94,7 @@ async function deleteDavTree(env, entry) {
     }
   }
 
+  await putDavTombstone(env, entry.path);
   await deleteDavEntry(env, entry.path);
 }
 
