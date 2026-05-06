@@ -11,7 +11,8 @@ import {
   materializeProjectedDavEntries,
   moveDavTree,
   normalizeDavPath,
-  putDavEntry
+  putDavEntry,
+  renameDavBackedFile
 } from '../_lib/dav.js';
 import { json, methodNotAllowed, serviceUnavailable, text } from '../_lib/http.js';
 import { getRuntimeConfig } from '../_lib/runtime-config.js';
@@ -385,6 +386,10 @@ export async function onRequest(context) {
     const moved = await moveDavTree(context.env, davPath, destinationPath);
     if (!moved.success) {
       return text(moved.error, { status: moved.status || 500, headers: davHeaders() });
+    }
+
+    if (sourceEntry.kind === 'file' && sourceEntry.storageKey) {
+      await renameDavBackedFile(context.env, sourceEntry.storageKey, getDavBaseName(destinationPath) || sourceEntry.name);
     }
 
     return new Response(null, { status: 201, headers: davHeaders() });

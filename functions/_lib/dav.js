@@ -1,4 +1,4 @@
-import { INTERNAL_KEY_PREFIX, isInternalKey, normalizeMetadata, readInternalJson, writeInternalJson } from './kv.js';
+import { INTERNAL_KEY_PREFIX, isInternalKey, normalizeMetadata, readInternalJson, updateMetadata, writeInternalJson } from './kv.js';
 
 export const DAV_ENTRY_PREFIX = `${INTERNAL_KEY_PREFIX}dav/entries`;
 
@@ -88,6 +88,50 @@ function inferDavContentType(fileName = '') {
   return 'application/octet-stream';
 }
 
+async function loadStorageRecord(env, storageKey, cache) {
+  if (!storageKey) {
+    return null;
+  }
+
+  if (cache?.has(storageKey)) {
+    return cache.get(storageKey);
+  }
+
+  const record = await env.img_url.getWithMetadata(storageKey).catch(() => null);
+  const normalized = record
+    ? {
+        ...record,
+        metadata: record.metadata ? normalizeMetadata(storageKey, record.metadata) : null
+      }
+    : null;
+
+  cache?.set(storageKey, normalized);
+  return normalized;
+}
+
+function pickPreferredAlias(current, candidate, preferredFileName = '') {
+  const currentMatchesPreferred = getDavBaseName(current.path) === preferredFileName;
+  const candidateMatchesPreferred = getDavBaseName(candidate.path) === preferredFileName;
+
+  if (currentMatchesPreferred !== candidateMatchesPreferred) {
+    return candidateMatchesPreferred ? candidate : current;
+  }
+
+  const currentUpdatedAt = Number(current.updatedAt || 0);
+  const candidateUpdatedAt = Number(candidate.updatedAt || 0);
+  if (currentUpdatedAt !== candidateUpdatedAt) {
+    return candidateUpdatedAt > currentUpdatedAt ? candidate : current;
+  }
+
+  const currentCreatedAt = Number(current.createdAt || 0);
+  const candidateCreatedAt = Number(candidate.createdAt || 0);
+  if (currentCreatedAt !== candidateCreatedAt) {
+    return candidateCreatedAt > currentCreatedAt ? candidate : current;
+  }
+
+  return candidate.path.localeCompare(current.path) < 0 ? candidate : current;
+}
+
 export function createDavEtag(entry) {
   const base = [
     entry.kind,
@@ -116,6 +160,19 @@ export async function getDavEntry(env, davPath) {
   const entry = await readInternalJson(env, getDavEntryKey(davPath));
   if (!entry || typeof entry !== 'object') {
     return null;
+  }
+
+  if (entry.kind === 'file') {
+    if (!entry.storageKey) {
+      await deleteDavEntry(env, davPath);
+      return null;
+    }
+
+    const record = await env.img_url.getWithMetadata(entry.storageKey).catch(() => null);
+    if (!record) {
+      await deleteDavEntry(env, davPath);
+      return null;
+    }
   }
 
   return entry;
@@ -228,8 +285,50 @@ export async function listAllDavEntries(env) {
 
 export async function materializeProjectedDavEntries(env) {
   const existingEntries = await listAllDavEntries(env);
-  const mappedStorageKeys = new Set(existingEntries.filter((entry) => entry.kind === 'file' && entry.storageKey).map((entry) => entry.storageKey));
-  const occupiedPaths = new Set(existingEntries.map((entry) => entry.path));
+  const recordCache = new Map();
+  const stalePaths = new Set();
+  const dedupedEntries = [];
+  const fileEntriesByStorageKey = new Map();
+
+  for (const entry of existingEntries) {
+    if (entry.kind !== 'file') {
+      dedupedEntries.push(entry);
+      continue;
+    }
+
+    if (!entry.storageKey) {
+      stalePaths.add(entry.path);
+      continue;
+    }
+
+    const record = await loadStorageRecord(env, entry.storageKey, recordCache);
+    if (!record) {
+      stalePaths.add(entry.path);
+      continue;
+    }
+
+    const current = fileEntriesByStorageKey.get(entry.storageKey);
+    if (!current) {
+      fileEntriesByStorageKey.set(entry.storageKey, entry);
+      continue;
+    }
+
+    const preferred = pickPreferredAlias(current, entry, record.metadata?.fileName || '');
+    const stale = preferred === entry ? current : entry;
+    stalePaths.add(stale.path);
+    fileEntriesByStorageKey.set(entry.storageKey, preferred);
+  }
+
+  for (const entry of fileEntriesByStorageKey.values()) {
+    dedupedEntries.push(entry);
+  }
+
+  for (const stalePath of stalePaths) {
+    await deleteDavEntry(env, stalePath);
+  }
+
+  const mappedStorageKeys = new Set(dedupedEntries.filter((entry) => entry.kind === 'file' && entry.storageKey).map((entry) => entry.storageKey));
+  const occupiedPaths = new Set(dedupedEntries.map((entry) => entry.path));
   const records = [];
 
   let cursor;
@@ -284,6 +383,17 @@ export async function materializeProjectedDavEntries(env) {
       createdAt: record.updatedAt
     });
   }
+}
+
+export async function renameDavBackedFile(env, storageKey, fileName) {
+  if (!storageKey || !fileName) {
+    return null;
+  }
+
+  return updateMetadata(env, storageKey, (current) => ({
+    ...current,
+    fileName
+  }));
 }
 
 export async function moveDavTree(env, fromPath, toPath) {

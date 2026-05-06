@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { onRequest } from '../functions/dav/[[path]].js';
+import { listRecords } from '../functions/_lib/kv.js';
 import { getDavEntryKey } from '../functions/_lib/dav.js';
 import { createKv } from './helpers.js';
 
@@ -199,5 +200,140 @@ describe('WebDAV route', () => {
       })
     });
     expect(missingResponse.status).toBe(404);
+  });
+
+  it('keeps projected root moves in sync with admin metadata and hides the old path', async () => {
+    const env = {
+      TG_Bot_Token: 'token',
+      TG_Chat_ID: '-10001',
+      img_url: createKv({
+        'photo-1777973665-36.jpg': {
+          fileName: 'photo-1777973665-36.jpg',
+          fileSize: 175000,
+          TimeStamp: 1710001000
+        }
+      })
+    };
+
+    const initialList = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+    expect(initialList.status).toBe(207);
+    expect(await initialList.text()).toContain('/dav/photo-1777973665-36.jpg');
+
+    const moveResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/photo-1777973665-36.jpg', {
+        method: 'MOVE',
+        headers: {
+          destination: 'https://example.com/dav/crabsoft.jpg'
+        }
+      })
+    });
+    expect(moveResponse.status).toBe(201);
+
+    const records = await listRecords(env, { limit: 10 });
+    expect(records.keys).toHaveLength(1);
+    expect(records.keys[0].name).toBe('photo-1777973665-36.jpg');
+    expect(records.keys[0].metadata.fileName).toBe('crabsoft.jpg');
+
+    const rootAfterMove = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+    expect(rootAfterMove.status).toBe(207);
+    const rootBody = await rootAfterMove.text();
+    expect(rootBody).toContain('/dav/crabsoft.jpg');
+    expect(rootBody).not.toContain('/dav/photo-1777973665-36.jpg');
+
+    const oldPathDelete = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/photo-1777973665-36.jpg', {
+        method: 'DELETE'
+      })
+    });
+    expect(oldPathDelete.status).toBe(404);
+
+    const newPathDelete = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/crabsoft.jpg', {
+        method: 'DELETE'
+      })
+    });
+    expect(newPathDelete.status).toBe(204);
+  });
+
+  it('prunes stale duplicate DAV aliases before listing or deleting', async () => {
+    const storageKey = 'photo-1777973665-36.jpg';
+    const env = {
+      TG_Bot_Token: 'token',
+      TG_Chat_ID: '-10001',
+      img_url: createKv({
+        [storageKey]: {
+          fileName: 'crabsoft.jpg',
+          fileSize: 175000,
+          TimeStamp: 1710001000
+        },
+        [getDavEntryKey('/photo-1777973665-36.jpg')]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path: '/photo-1777973665-36.jpg',
+            name: 'photo-1777973665-36.jpg',
+            storageKey,
+            size: 175000,
+            contentType: 'image/jpeg',
+            createdAt: 1710001000,
+            updatedAt: 1710001000
+          })
+        },
+        [getDavEntryKey('/crabsoft.jpg')]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path: '/crabsoft.jpg',
+            name: 'crabsoft.jpg',
+            storageKey,
+            size: 175000,
+            contentType: 'image/jpeg',
+            createdAt: 1710001001,
+            updatedAt: 1710001002
+          })
+        }
+      })
+    };
+
+    const rootResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+    expect(rootResponse.status).toBe(207);
+    const rootBody = await rootResponse.text();
+    expect(rootBody).toContain('/dav/crabsoft.jpg');
+    expect(rootBody).not.toContain('/dav/photo-1777973665-36.jpg');
+
+    const oldPathDelete = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/photo-1777973665-36.jpg', {
+        method: 'DELETE'
+      })
+    });
+    expect(oldPathDelete.status).toBe(404);
+
+    const newPathDelete = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/crabsoft.jpg', {
+        method: 'DELETE'
+      })
+    });
+    expect(newPathDelete.status).toBe(204);
   });
 });
