@@ -1,4 +1,5 @@
 import { INTERNAL_KEY_PREFIX, isInternalKey, normalizeMetadata, readInternalJson, updateMetadata, writeInternalJson } from './kv.js';
+import { isTelegramFileKey } from './telegram.js';
 
 export const DAV_ENTRY_PREFIX = `${INTERNAL_KEY_PREFIX}dav/entries`;
 
@@ -109,6 +110,18 @@ async function loadStorageRecord(env, storageKey, cache) {
   return normalized;
 }
 
+function isGhostDavBackingRecord(davPath, storageKey, metadata) {
+  if (!storageKey || !metadata || !isTelegramFileKey(storageKey)) {
+    return false;
+  }
+
+  return metadata.fileName === storageKey
+    && getDavBaseName(davPath) !== metadata.fileName
+    && metadata.source === 'unknown'
+    && Number(metadata.fileSize || 0) === 0
+    && !metadata.telegram;
+}
+
 function pickPreferredAlias(current, candidate, preferredFileName = '') {
   const currentMatchesPreferred = getDavBaseName(current.path) === preferredFileName;
   const candidateMatchesPreferred = getDavBaseName(candidate.path) === preferredFileName;
@@ -170,6 +183,13 @@ export async function getDavEntry(env, davPath) {
 
     const record = await env.img_url.getWithMetadata(entry.storageKey).catch(() => null);
     if (!record) {
+      await deleteDavEntry(env, davPath);
+      return null;
+    }
+
+    const metadata = record.metadata ? normalizeMetadata(entry.storageKey, record.metadata) : null;
+    if (isGhostDavBackingRecord(davPath, entry.storageKey, metadata)) {
+      await env.img_url.delete(entry.storageKey);
       await deleteDavEntry(env, davPath);
       return null;
     }
@@ -245,13 +265,20 @@ export async function listDavChildren(env, davPath) {
       }
       seen.add(childPath);
       const entry = await getDavEntry(env, childPath);
-      children.push(entry || {
-        kind: 'collection',
-        path: childPath,
-        name: getDavBaseName(childPath),
-        createdAt: 0,
-        updatedAt: 0
-      });
+      if (entry) {
+        children.push(entry);
+        continue;
+      }
+
+      if (remainder.includes('/')) {
+        children.push({
+          kind: 'collection',
+          path: childPath,
+          name: getDavBaseName(childPath),
+          createdAt: 0,
+          updatedAt: 0
+        });
+      }
     }
 
     done = page.list_complete;
@@ -287,6 +314,7 @@ export async function materializeProjectedDavEntries(env) {
   const existingEntries = await listAllDavEntries(env);
   const recordCache = new Map();
   const stalePaths = new Set();
+  const ghostStorageKeys = new Set();
   const dedupedEntries = [];
   const fileEntriesByStorageKey = new Map();
 
@@ -307,6 +335,12 @@ export async function materializeProjectedDavEntries(env) {
       continue;
     }
 
+    if (isGhostDavBackingRecord(entry.path, entry.storageKey, record.metadata)) {
+      stalePaths.add(entry.path);
+      ghostStorageKeys.add(entry.storageKey);
+      continue;
+    }
+
     const current = fileEntriesByStorageKey.get(entry.storageKey);
     if (!current) {
       fileEntriesByStorageKey.set(entry.storageKey, entry);
@@ -321,6 +355,10 @@ export async function materializeProjectedDavEntries(env) {
 
   for (const entry of fileEntriesByStorageKey.values()) {
     dedupedEntries.push(entry);
+  }
+
+  for (const storageKey of ghostStorageKeys) {
+    await env.img_url.delete(storageKey);
   }
 
   for (const stalePath of stalePaths) {

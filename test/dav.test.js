@@ -336,4 +336,44 @@ describe('WebDAV route', () => {
     });
     expect(newPathDelete.status).toBe(204);
   });
+
+  it('drops ghost DAV aliases whose backing Telegram key was only resurrected by file access', async () => {
+    const storageKey = 'BQACAgEAAyEGAASOZ3wkAAMqaft4N_wLE7pymfBTuT3HYAcMwhIAAp4IAAK9l9hHk8sxoOTIB4Y7BA.txt';
+    const ghostPath = '/dav-http-probe-1778087990.txt';
+    const env = {
+      img_url: createKv({
+        [storageKey]: {
+          fileName: storageKey,
+          fileSize: 0,
+          TimeStamp: 1778090629334,
+          source: 'unknown'
+        },
+        [getDavEntryKey(ghostPath)]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path: ghostPath,
+            name: 'dav-http-probe-1778087990.txt',
+            storageKey,
+            size: 17,
+            contentType: 'text/plain',
+            createdAt: 1778088004294,
+            updatedAt: 1778088004294
+          })
+        }
+      })
+    };
+
+    const rootResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+    expect(rootResponse.status).toBe(207);
+    const rootBody = await rootResponse.text();
+    expect(rootBody).not.toContain('/dav/dav-http-probe-1778087990.txt');
+    expect(await env.img_url.getWithMetadata(storageKey)).toBeNull();
+    expect(await env.img_url.get(getDavEntryKey(ghostPath))).toBeNull();
+  });
 });

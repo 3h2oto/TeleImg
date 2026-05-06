@@ -189,4 +189,44 @@ describe('/file/[id]', () => {
 
     expect(verified).toBe(true);
   });
+
+  it('does not recreate a deleted Telegram KV record just because the file is opened', async () => {
+    const key = 'BQACAgEAAyEGAASOZ3wkAAMqaft4N_wLE7pymfBTuT3HYAcMwhIAAp4IAAK9l9hHk8sxoOTIB4Y7BA.txt';
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/bottoken/getFile')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          result: { file_path: 'documents/file.txt' }
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      if (url.includes('/file/bottoken/documents/file.txt')) {
+        return new Response('payload', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' }
+        });
+      }
+
+      throw new Error(`unexpected upstream fetch: ${url}`);
+    });
+
+    const env = {
+      TG_Bot_Token: 'token',
+      img_url: createKv()
+    };
+
+    const response = await onRequest({
+      env,
+      params: { id: key },
+      request: new Request(`https://teleimg.example/file/${key}`)
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('payload');
+    expect(await env.img_url.getWithMetadata(key)).toBeNull();
+  });
 });

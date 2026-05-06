@@ -1,4 +1,4 @@
-import { getOrCreateMetadata } from '../_lib/kv.js';
+import { getRecord, normalizeMetadata } from '../_lib/kv.js';
 import { buildMtprotoBridgeRedirect, isTelegramLargeFileError } from '../_lib/mtproto-bridge.js';
 import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFile } from '../_lib/telegram.js';
 import { redirect, serviceUnavailable, text } from '../_lib/http.js';
@@ -129,19 +129,21 @@ export async function onRequest(context) {
   const key = params.id;
   const url = new URL(request.url);
   const adminPreview = isAdminPreview(request);
-  let metadata = env.img_url ? await getOrCreateMetadata(env, key) : null;
+  const record = env.img_url ? await getRecord(env, key) : null;
+  let metadata = record?.metadata || null;
+  const effectiveMetadata = metadata || normalizeMetadata(key, {});
 
-  if (!adminPreview && metadata) {
-    if (metadata.ListType === 'Block' || metadata.Label === 'adult') {
+  if (!adminPreview) {
+    if (effectiveMetadata.ListType === 'Block' || effectiveMetadata.Label === 'adult') {
       return redirect(`${url.origin}/block-img`);
     }
 
-    const isWhiteListed = metadata.ListType === 'White';
+    const isWhiteListed = effectiveMetadata.ListType === 'White';
     if (!isWhiteListed && isWhitelistModeEnabled(config)) {
       return redirect(`${url.origin}/whitelist-on`);
     }
 
-    if (!isWhiteListed) {
+    if (!isWhiteListed && metadata) {
       try {
         metadata = await moderateLegacyAsset(config, env, url, key, metadata);
       } catch (response) {
