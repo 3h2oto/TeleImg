@@ -57,6 +57,39 @@ afterEach(() => {
 });
 
 describe('WebDAV route', () => {
+  it('projects existing TeleImg records into DAV root', async () => {
+    const env = {
+      img_url: createKv({
+        'telegram-file-id-1.jpg': {
+          fileName: 'existing-photo.jpg',
+          fileSize: 123,
+          TimeStamp: 10
+        }
+      })
+    };
+
+    const propfindResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav', {
+        method: 'PROPFIND',
+        headers: { depth: '1' }
+      })
+    });
+
+    expect(propfindResponse.status).toBe(207);
+    const body = await propfindResponse.text();
+    expect(body).toContain('/dav/existing-photo.jpg');
+
+    const getResponse = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/existing-photo.jpg', {
+        method: 'GET'
+      })
+    });
+    expect(getResponse.status).toBe(200);
+    expect(await getResponse.text()).toBe('hello');
+  });
+
   it('supports OPTIONS and PROPFIND for created collections', async () => {
     const env = { img_url: createKv() };
 

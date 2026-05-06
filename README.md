@@ -259,6 +259,7 @@ Implementation notes:
 - file bytes still live in the existing Telegram / bridge / KV stack
 - WebDAV is just another protocol facade over the same storage core
 - directories are virtual
+- the `/dav/` root now auto-projects existing TeleImg files, so historical uploads show up without re-uploading through DAV
 
 ### Quick Linux usage
 
@@ -276,6 +277,8 @@ Or mount with `davfs2`:
 sudo mkdir -p /mnt/teleimg
 sudo mount -t davfs https://img.vicco.eu.org/dav/ /mnt/teleimg
 ```
+
+If you do not want the mount owned by `root`, use suitable `uid` / `gid` options or your local `davfs2` user configuration.
 
 Authenticate with:
 

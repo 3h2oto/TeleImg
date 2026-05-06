@@ -1,4 +1,4 @@
-import { INTERNAL_KEY_PREFIX, readInternalJson, writeInternalJson } from './kv.js';
+import { INTERNAL_KEY_PREFIX, isInternalKey, normalizeMetadata, readInternalJson, writeInternalJson } from './kv.js';
 
 export const DAV_ENTRY_PREFIX = `${INTERNAL_KEY_PREFIX}dav/entries`;
 
@@ -50,6 +50,42 @@ export function buildDavHref(davPath, isCollection) {
     : davPath.split('/').filter(Boolean).map((part) => encodeURIComponent(part)).join('/');
   const href = encodedPath ? `/dav/${encodedPath}` : '/dav';
   return isCollection ? `${href}/` : href;
+}
+
+function sanitizeDavLeafName(name, fallback) {
+  const candidate = String(name || fallback || '')
+    .trim()
+    .replace(/[\\\/]+/g, '-')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 240);
+  return candidate || fallback || 'file';
+}
+
+function appendStableSuffix(name, storageKey, counter = '') {
+  const suffix = `__${String(storageKey || 'item').slice(0, 12)}${counter ? `_${counter}` : ''}`;
+  const dot = name.lastIndexOf('.');
+  if (dot > 0) {
+    return `${name.slice(0, dot)}${suffix}${name.slice(dot)}`;
+  }
+  return `${name}${suffix}`;
+}
+
+function inferDavContentType(fileName = '') {
+  const lower = String(fileName).toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.webm')) return 'video/webm';
+  if (lower.endsWith('.mov')) return 'video/quicktime';
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.ogg')) return 'audio/ogg';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  if (lower.endsWith('.txt')) return 'text/plain';
+  return 'application/octet-stream';
 }
 
 export function createDavEtag(entry) {
@@ -166,6 +202,88 @@ export async function listDavChildren(env, davPath) {
 
   children.sort((left, right) => left.path.localeCompare(right.path));
   return children;
+}
+
+export async function listAllDavEntries(env) {
+  const entries = [];
+  let cursor;
+  let done = false;
+
+  while (!done) {
+    const page = await env.img_url.list({ prefix: DAV_ENTRY_PREFIX, cursor, limit: 1000 });
+    cursor = page.cursor;
+
+    for (const item of page.keys || []) {
+      const entry = await readInternalJson(env, item.name);
+      if (entry?.path && entry.path !== '/') {
+        entries.push(entry);
+      }
+    }
+
+    done = page.list_complete;
+  }
+
+  return entries;
+}
+
+export async function materializeProjectedDavEntries(env) {
+  const existingEntries = await listAllDavEntries(env);
+  const mappedStorageKeys = new Set(existingEntries.filter((entry) => entry.kind === 'file' && entry.storageKey).map((entry) => entry.storageKey));
+  const occupiedPaths = new Set(existingEntries.map((entry) => entry.path));
+  const records = [];
+
+  let cursor;
+  let done = false;
+  while (!done) {
+    const page = await env.img_url.list({ cursor, limit: 1000 });
+    cursor = page.cursor;
+
+    for (const item of page.keys || []) {
+      if (isInternalKey(item.name)) {
+        continue;
+      }
+
+      if (mappedStorageKeys.has(item.name)) {
+        continue;
+      }
+
+      const metadata = normalizeMetadata(item.name, item.metadata);
+      records.push({
+        storageKey: item.name,
+        fileName: sanitizeDavLeafName(metadata.fileName, item.name),
+        size: metadata.fileSize,
+        updatedAt: metadata.TimeStamp
+      });
+    }
+
+    done = page.list_complete;
+  }
+
+  records.sort((left, right) => left.storageKey.localeCompare(right.storageKey));
+
+  for (const record of records) {
+    let candidate = `/${record.fileName}`;
+    if (occupiedPaths.has(candidate)) {
+      let nextName = appendStableSuffix(record.fileName, record.storageKey);
+      candidate = `/${nextName}`;
+      let counter = 1;
+      while (occupiedPaths.has(candidate)) {
+        nextName = appendStableSuffix(record.fileName, record.storageKey, counter);
+        candidate = `/${nextName}`;
+        counter += 1;
+      }
+    }
+
+    occupiedPaths.add(candidate);
+    mappedStorageKeys.add(record.storageKey);
+    await putDavEntry(env, candidate, {
+      kind: 'file',
+      storageKey: record.storageKey,
+      size: record.size,
+      contentType: inferDavContentType(record.fileName),
+      createdAt: record.updatedAt
+    });
+  }
 }
 
 export async function moveDavTree(env, fromPath, toPath) {

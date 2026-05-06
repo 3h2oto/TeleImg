@@ -259,6 +259,7 @@ npm run mtproto:worker:deploy -- --dry-run
 - 文件内容仍然落在现有 Telegram / bridge / KV 体系里
 - WebDAV 只是协议门面，不是另一套独立存储
 - 目录采用“虚拟目录”模型
+- `/dav/` 根目录会自动投影现有 TeleImg 文件，不需要先用 DAV 重传一遍历史文件
 
 ### Linux 快速试用
 
@@ -276,6 +277,8 @@ cadaver https://img.vicco.eu.org/dav/
 sudo mkdir -p /mnt/teleimg
 sudo mount -t davfs https://img.vicco.eu.org/dav/ /mnt/teleimg
 ```
+
+如果你不想挂载后目录归 `root`，可以考虑配合 `uid` / `gid` 选项或 `davfs2` 本地配置来挂到当前用户。
 
 认证时使用：
 

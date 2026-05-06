@@ -8,6 +8,7 @@ import {
   getDavBaseName,
   getDavEntry,
   listDavChildren,
+  materializeProjectedDavEntries,
   moveDavTree,
   normalizeDavPath,
   putDavEntry
@@ -199,6 +200,10 @@ export async function onRequest(context) {
   }
 
   if (method === 'PROPFIND') {
+    if (davPath === '/') {
+      await materializeProjectedDavEntries(context.env);
+    }
+
     const entry = await getDavEntry(context.env, davPath);
     if (!entry) {
       return text('Not found.', { status: 404, headers: davHeaders() });
@@ -221,6 +226,7 @@ export async function onRequest(context) {
   }
 
   if (method === 'HEAD' || method === 'GET') {
+    await materializeProjectedDavEntries(context.env);
     const entry = await getDavEntry(context.env, davPath);
     if (!entry) {
       return text('Not found.', { status: 404, headers: davHeaders() });
@@ -317,6 +323,7 @@ export async function onRequest(context) {
   }
 
   if (method === 'DELETE') {
+    await materializeProjectedDavEntries(context.env);
     if (davPath === '/') {
       return text('Cannot delete root collection.', { status: 405, headers: davHeaders() });
     }
@@ -340,6 +347,7 @@ export async function onRequest(context) {
   }
 
   if (method === 'MOVE') {
+    await materializeProjectedDavEntries(context.env);
     if (davPath === '/') {
       return text('Cannot move root collection.', { status: 405, headers: davHeaders() });
     }
@@ -383,6 +391,7 @@ export async function onRequest(context) {
   }
 
   if (method === 'COPY') {
+    await materializeProjectedDavEntries(context.env);
     if (davPath === '/') {
       return text('Cannot copy root collection.', { status: 405, headers: davHeaders() });
     }
