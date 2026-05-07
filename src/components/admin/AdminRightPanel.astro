@@ -45,7 +45,19 @@
     const bus = ensureAdminBus();
     const tree = root.querySelector('[data-role="folder-tree"]');
     const summary = root.querySelector('[data-role="folder-summary"]');
+    const toggleButton = root.querySelector('[data-action="toggle-panel"]');
     let collapsed = false;
+
+    const applyCollapsedState = () => {
+      root.classList.toggle('is-collapsed', collapsed);
+      root.style.width = collapsed ? '68px' : '300px';
+      root.style.flexBasis = collapsed ? '68px' : '300px';
+      root.style.maxWidth = collapsed ? '68px' : '300px';
+      if (toggleButton) {
+        toggleButton.textContent = collapsed ? '◀' : '▶';
+        toggleButton.setAttribute('aria-expanded', String(!collapsed));
+      }
+    };
 
     const renderNode = (state, node) => {
       const cached = state.folderCache.get(node.path);
@@ -93,9 +105,7 @@
 
       if (action === 'toggle-panel') {
         collapsed = !collapsed;
-        root.classList.toggle('is-collapsed', collapsed);
-        button.textContent = collapsed ? '◀' : '▶';
-        button.setAttribute('aria-expanded', String(!collapsed));
+        applyCollapsedState();
         return;
       }
 
@@ -135,6 +145,8 @@
         bus.setStatus(error instanceof Error ? error.message : '目录树操作失败。', 'error');
       }
     });
+
+    applyCollapsedState();
   });
 </script>
 
@@ -182,24 +194,24 @@
     margin-bottom: 12px;
   }
 
-  .folder-tree__root,
-  .folder-tree__children {
+  :global(.folder-tree__root),
+  :global(.folder-tree__children) {
     list-style: none;
     margin: 0;
     padding: 0;
   }
 
-  .folder-tree__children {
+  :global(.folder-tree__children) {
     margin-left: 18px;
     padding-left: 10px;
     border-left: 1px dashed rgba(168, 255, 96, 0.12);
   }
 
-  .folder-tree__item + .folder-tree__item {
+  :global(.folder-tree__item + .folder-tree__item) {
     margin-top: 8px;
   }
 
-  .folder-tree__row {
+  :global(.folder-tree__row) {
     display: grid;
     grid-template-columns: 32px minmax(0, 1fr);
     align-items: center;
@@ -208,13 +220,13 @@
     border-radius: 14px;
   }
 
-  .folder-tree__row.is-active {
+  :global(.folder-tree__row.is-active) {
     background: rgba(57, 242, 174, 0.1);
     box-shadow: inset 0 0 0 1px rgba(57, 242, 174, 0.16);
   }
 
-  .folder-tree__toggle,
-  .folder-tree__link {
+  :global(.folder-tree__toggle),
+  :global(.folder-tree__link) {
     min-height: 36px;
     border-radius: 12px;
     border: 1px solid rgba(168, 255, 96, 0.08);
@@ -223,7 +235,7 @@
     cursor: pointer;
   }
 
-  .folder-tree__link {
+  :global(.folder-tree__link) {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -232,7 +244,7 @@
     overflow: hidden;
   }
 
-  .folder-tree__label {
+  :global(.folder-tree__label) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -76,7 +76,19 @@ if (!commitHash) {
 
     const bus = ensureAdminBus();
     const bridgePanel = root.querySelector('[data-role="bridge-panel"]');
+    const toggleButton = root.querySelector('[data-action="toggle-panel"]');
     let collapsed = false;
+
+    const applyCollapsedState = () => {
+      root.classList.toggle('is-collapsed', collapsed);
+      root.style.width = collapsed ? '68px' : '320px';
+      root.style.flexBasis = collapsed ? '68px' : '320px';
+      root.style.maxWidth = collapsed ? '68px' : '320px';
+      if (toggleButton) {
+        toggleButton.textContent = collapsed ? '▶' : '◀';
+        toggleButton.setAttribute('aria-expanded', String(!collapsed));
+      }
+    };
 
     const renderBridgePanel = (bridge) => {
       const telegram = bus.state.telegramStatus || {};
@@ -130,9 +142,7 @@ if (!commitHash) {
       const action = button.dataset.action;
       if (action === 'toggle-panel') {
         collapsed = !collapsed;
-        root.classList.toggle('is-collapsed', collapsed);
-        button.textContent = collapsed ? '▶' : '◀';
-        button.setAttribute('aria-expanded', String(!collapsed));
+        applyCollapsedState();
         return;
       }
 
@@ -154,6 +164,8 @@ if (!commitHash) {
         bus.setStatus(error instanceof Error ? error.message : '左侧功能执行失败。', 'error');
       }
     });
+
+    applyCollapsedState();
   });
 </script>
 
@@ -214,17 +226,17 @@ if (!commitHash) {
     margin-top: 14px;
   }
 
-  .admin-pane__buttons--inline {
+  :global(.admin-pane__buttons--inline) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .bridge-panel__grid {
+  :global(.bridge-panel__grid.admin-pane__panel-grid) {
     display: grid;
     gap: 10px;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 
-  .bridge-panel__grid div {
+  :global(.bridge-panel__grid.admin-pane__panel-grid div) {
     padding: 12px 14px;
     border-radius: 16px;
     border: 1px solid rgba(168, 255, 96, 0.08);
@@ -232,13 +244,13 @@ if (!commitHash) {
     min-width: 0;
   }
 
-  .bridge-panel__grid dt {
+  :global(.bridge-panel__grid.admin-pane__panel-grid dt) {
     margin-bottom: 6px;
     color: var(--muted);
     font-size: 0.82rem;
   }
 
-  .bridge-panel__grid dd {
+  :global(.bridge-panel__grid.admin-pane__panel-grid dd) {
     margin: 0;
     color: var(--text);
     font-size: 0.94rem;
