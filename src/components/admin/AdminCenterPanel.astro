@@ -57,6 +57,11 @@
     const form = root.querySelector('[data-role="search-form"]');
     const breadcrumbs = root.querySelector('[data-role="breadcrumbs"]');
     const folderContext = root.querySelector('[data-role="folder-context"]');
+    let lastBreadcrumbKey = '';
+    let lastFolderContextKey = '';
+    let lastSummaryKey = '';
+    let lastGridKey = '';
+    let lastDetailsKey = '';
 
     const renderCard = (item, selected) => {
       const badges = [
@@ -142,7 +147,9 @@
     };
 
     const render = (state) => {
-      form.search.value = state.search;
+      if (form.search.value !== state.search) {
+        form.search.value = state.search;
+      }
       status.textContent = state.statusMessage;
       status.dataset.tone = state.statusTone;
       grid.dataset.view = state.view;
@@ -151,34 +158,76 @@
       const filtered = bus.getFilteredItems();
       const crumbs = buildBreadcrumbs(state.currentPath);
       const counts = state.currentBrowse?.counts || { folders: 0, files: 0 };
+      const breadcrumbKey = state.currentPath;
+      const folderContextKey = `${state.currentPath}|${counts.folders}|${counts.files}|${state.search}`;
+      const summaryKey = `${filtered.length}|${selected?.name || ''}|${filtered.filter((item) => item.canDeleteTelegram).length}`;
+      const gridKey = `${state.currentPath}|${state.search}|${selected?.name || ''}|${filtered.map((item) => [
+        item.name,
+        item.davPath || '',
+        item.metadata?.liked ? '1' : '0',
+        item.metadata?.Label || '',
+        item.metadata?.source || '',
+        item.metadata?.TimeStamp || '',
+        item.metadata?.telegram?.mediaKind || '',
+        item.canDeleteTelegram ? '1' : '0'
+      ].join(':')).join('|')}`;
+      const detailsKey = selected
+        ? [
+            selected.name,
+            selected.url,
+            selected.davPath || '',
+            selected.metadata?.fileName || '',
+            selected.metadata?.liked ? '1' : '0',
+            selected.metadata?.Label || '',
+            selected.metadata?.source || '',
+            selected.metadata?.TimeStamp || '',
+            selected.metadata?.telegram?.messageId || '',
+            selected.metadata?.telegram?.chatId || ''
+          ].join('|')
+        : 'none';
 
-      breadcrumbs.innerHTML = crumbs.map((crumb, index) => {
-        const isLast = index === crumbs.length - 1;
-        return `
-          <button type="button" class="breadcrumb-chip${isLast ? ' is-current' : ''}" data-action="open-folder" data-path="${crumb.path}">
-            ${crumb.label}
-          </button>
-        `;
-      }).join('<span class="breadcrumb-sep">/</span>');
+      if (breadcrumbKey !== lastBreadcrumbKey) {
+        breadcrumbs.innerHTML = crumbs.map((crumb, index) => {
+          const isLast = index === crumbs.length - 1;
+          return `
+            <button type="button" class="breadcrumb-chip${isLast ? ' is-current' : ''}" data-action="open-folder" data-path="${crumb.path}">
+              ${crumb.label}
+            </button>
+          `;
+        }).join('<span class="breadcrumb-sep">/</span>');
+        lastBreadcrumbKey = breadcrumbKey;
+      }
 
-      folderContext.innerHTML = [
-        `当前目录：${state.currentPath}`,
-        `子目录：${counts.folders}`,
-        `文件：${counts.files}`,
-        `搜索：${state.search || '全部'}`
-      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+      if (folderContextKey !== lastFolderContextKey) {
+        folderContext.innerHTML = [
+          `当前目录：${state.currentPath}`,
+          `子目录：${counts.folders}`,
+          `文件：${counts.files}`,
+          `搜索：${state.search || '全部'}`
+        ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+        lastFolderContextKey = folderContextKey;
+      }
 
-      summary.innerHTML = [
-        `当前目录文件：${filtered.length}`,
-        `可远端删除：${filtered.filter((item) => item.canDeleteTelegram).length}`,
-        selected ? `已选中：${selected.metadata?.fileName || selected.davName || selected.name}` : '已选中：无'
-      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+      if (summaryKey !== lastSummaryKey) {
+        summary.innerHTML = [
+          `当前目录文件：${filtered.length}`,
+          `可远端删除：${filtered.filter((item) => item.canDeleteTelegram).length}`,
+          selected ? `已选中：${selected.metadata?.fileName || selected.davName || selected.name}` : '已选中：无'
+        ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+        lastSummaryKey = summaryKey;
+      }
 
-      grid.innerHTML = filtered.length
-        ? filtered.map((item) => renderCard(item, selected?.name === item.name)).join('')
-        : '<div class="empty-state">当前目录下没有匹配文件。</div>';
+      if (gridKey !== lastGridKey) {
+        grid.innerHTML = filtered.length
+          ? filtered.map((item) => renderCard(item, selected?.name === item.name)).join('')
+          : '<div class="empty-state">当前目录下没有匹配文件。</div>';
+        lastGridKey = gridKey;
+      }
 
-      renderDetails(selected);
+      if (detailsKey !== lastDetailsKey) {
+        renderDetails(selected);
+        lastDetailsKey = detailsKey;
+      }
     };
 
     const renameItem = async (item) => {
