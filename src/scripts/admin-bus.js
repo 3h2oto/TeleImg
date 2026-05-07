@@ -160,7 +160,7 @@ function createUploadTask(file, currentPath) {
 }
 
 const UPLOAD_URL_REFRESH_WINDOW_MS = 45 * 1000;
-const DEFAULT_CHUNK_UPLOAD_CONCURRENCY = 3;
+const DEFAULT_CHUNK_UPLOAD_CONCURRENCY = 6;
 
 function uploadExpiresAtMs(taskOrPrepared) {
   const expiresAt = Number(taskOrPrepared?.expiresAt || 0);
@@ -702,7 +702,7 @@ export function ensureAdminBus() {
     const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(task.fileSize / chunkSize)));
     const parallelChunks = Math.max(1, Math.min(
       Number(prepared.parallelChunks || DEFAULT_CHUNK_UPLOAD_CONCURRENCY) || DEFAULT_CHUNK_UPLOAD_CONCURRENCY,
-      5,
+      6,
       totalParts
     ));
     const resumedParts = normalizeCompletedPartNumbers(task.completedPartNumbers, totalParts);

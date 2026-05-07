@@ -6,7 +6,7 @@ import { buildMtprotoBridgeUploadUrl } from '../../../../shared/mtproto-bridge.j
 
 const WORKERS_DIRECT_UPLOAD_LIMIT = 95 * 1024 * 1024;
 const WORKERS_CHUNK_SIZE = 8 * 1024 * 1024;
-const WORKERS_PARALLEL_CHUNK_UPLOADS = 3;
+const WORKERS_PARALLEL_CHUNK_UPLOADS = 6;
 
 function sanitizeRequestedFileName(input) {
   const value = String(input || '')
