@@ -6,8 +6,7 @@
   "kv_namespaces": [
     {
       "binding": "img_url",
-      "id": "fcab249e4842448fbe96475d67174695",
-      "remote": true
+      "id": "fcab249e4842448fbe96475d67174695"
     }
   ]
 }
