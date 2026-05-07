@@ -701,31 +701,37 @@ export class MtprotoBridgeDO {
       entity
     });
 
-    if (session.receivedParts !== part) {
-      throw new Error(`Unexpected upload part ${part}; expected ${session.receivedParts}.`);
+    if (session.receivedChunks !== part) {
+      throw new Error(`Unexpected upload chunk ${part}; expected ${session.receivedChunks}.`);
     }
 
-    const ok = await client.invoke(new Api.upload.SaveBigFilePart({
-      fileId: session.fileId,
-      filePart: part,
-      fileTotalParts: session.totalParts,
-      bytes: chunkBuffer
-    }));
-    if (!ok) {
-      throw new Error(`Telegram refused chunk ${part}.`);
+    session.pending = session.pending.byteLength ? Buffer.concat([session.pending, chunkBuffer]) : chunkBuffer;
+    while (session.pending.byteLength >= session.telegramPartSize) {
+      const current = session.pending.subarray(0, session.telegramPartSize);
+      session.pending = session.pending.subarray(session.telegramPartSize);
+      const ok = await client.invoke(new Api.upload.SaveBigFilePart({
+        fileId: session.fileId,
+        filePart: session.telegramPartIndex,
+        fileTotalParts: session.telegramTotalParts,
+        bytes: current
+      }));
+      if (!ok) {
+        throw new Error(`Telegram refused upload part ${session.telegramPartIndex}.`);
+      }
+      session.telegramPartIndex += 1;
     }
 
-    session.receivedParts += 1;
+    session.receivedChunks += 1;
     session.bytesReceived += chunkBuffer.byteLength;
     session.lastTouchedAt = Date.now();
 
-    const complete = isFinal || session.receivedParts >= session.totalParts || session.bytesReceived >= session.fileSize;
+    const complete = isFinal || session.receivedChunks >= session.totalChunks || session.bytesReceived >= session.fileSize;
     if (!complete) {
       return uploadJson({
         ok: true,
         complete: false,
-        receivedParts: session.receivedParts,
-        totalParts: session.totalParts,
+        receivedParts: session.receivedChunks,
+        totalParts: session.totalChunks,
         uploadedBytes: session.bytesReceived,
         fileSize: session.fileSize
       }, {
@@ -738,9 +744,27 @@ export class MtprotoBridgeDO {
       throw new Error(`Chunked upload size mismatch: expected ${session.fileSize}, received ${session.bytesReceived}.`);
     }
 
+    if (session.pending.byteLength > 0) {
+      const ok = await client.invoke(new Api.upload.SaveBigFilePart({
+        fileId: session.fileId,
+        filePart: session.telegramPartIndex,
+        fileTotalParts: session.telegramTotalParts,
+        bytes: session.pending
+      }));
+      if (!ok) {
+        throw new Error(`Telegram refused final upload part ${session.telegramPartIndex}.`);
+      }
+      session.telegramPartIndex += 1;
+      session.pending = Buffer.alloc(0);
+    }
+
+    if (session.telegramPartIndex !== session.telegramTotalParts) {
+      throw new Error(`Chunked Telegram part mismatch: expected ${session.telegramTotalParts}, sent ${session.telegramPartIndex}.`);
+    }
+
     const uploaded = new Api.InputFileBig({
       id: session.fileId,
-      parts: session.totalParts,
+      parts: session.telegramTotalParts,
       name: session.fileName
     });
 
@@ -782,11 +806,17 @@ export class MtprotoBridgeDO {
       return existing;
     }
 
+    const telegramPartSize = utils.getAppropriatedPartSize(bigInt(values.fileSize)) * 1024;
     const session = {
       ...values,
       fileId: createUploadFileId(),
-      receivedParts: 0,
+      totalChunks: Number(values.totalParts),
+      receivedChunks: 0,
+      telegramPartSize,
+      telegramTotalParts: Math.floor((values.fileSize + telegramPartSize - 1) / telegramPartSize),
+      telegramPartIndex: 0,
       bytesReceived: 0,
+      pending: Buffer.alloc(0),
       lastTouchedAt: now
     };
     this.uploadSessions.set(sessionId, session);
