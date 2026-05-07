@@ -1,0 +1,31 @@
+---
+import AdminFavoritesDock from './AdminFavoritesDock.astro';
+import AdminUtilityDock from './AdminUtilityDock.astro';
+---
+
+<div class="admin-floating-stack">
+  <AdminFavoritesDock />
+  <AdminUtilityDock />
+</div>
+
+<style>
+  .admin-floating-stack {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 40;
+    width: min(360px, calc(100vw - 32px));
+    display: grid;
+    gap: 14px;
+    pointer-events: none;
+  }
+
+  @media (max-width: 900px) {
+    .admin-floating-stack {
+      right: 12px;
+      left: 12px;
+      width: auto;
+      bottom: 12px;
+    }
+  }
+</style>

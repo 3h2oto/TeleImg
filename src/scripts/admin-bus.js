@@ -195,6 +195,7 @@ export function ensureAdminBus() {
     ...initial,
     currentBrowse: null,
     currentItems: [],
+    favoriteItems: [],
     folderCache: new Map(),
     expandedFolders: new Set(['/']),
     selectedKey: null,
@@ -277,6 +278,19 @@ export function ensureAdminBus() {
     return payload;
   };
 
+  const fetchFavorites = async () => {
+    const response = await fetch('/api/manage/favorites?limit=24', {
+      headers: { accept: 'application/json' }
+    });
+    const payload = await response.json().catch(() => ({ error: '无法解析收藏列表。' }));
+    if (!response.ok) {
+      throw new Error(payload?.error || '获取收藏列表失败。');
+    }
+    state.favoriteItems = Array.isArray(payload.items) ? payload.items : [];
+    notify();
+    return state.favoriteItems;
+  };
+
   const postJson = async (path) => {
     const response = await fetch(path, { method: 'POST' });
     const payload = await response.json().catch(() => ({ error: '无法解析接口返回。' }));
@@ -357,7 +371,8 @@ export function ensureAdminBus() {
     started = true;
     startPromise = Promise.allSettled([
       fetchTelegramStatus(),
-      bootstrapFolders()
+      bootstrapFolders(),
+      fetchFavorites()
     ]).then(async (results) => {
       const folderResult = results[1];
       if (folderResult.status === 'rejected') {
@@ -477,11 +492,13 @@ export function ensureAdminBus() {
 
     state.folderCache.delete(parentPath);
     await openFolder(parentPath, { force: true });
+    await fetchFavorites().catch(() => {});
     setStatus('文件名已更新。', 'success');
   };
 
   const performItemAction = async (action, key) => {
-    const current = state.currentItems.find((item) => item.name === key);
+    const current = state.currentItems.find((item) => item.name === key)
+      || state.favoriteItems.find((item) => item.name === key);
     if (!current) {
       throw new Error('找不到当前文件。');
     }
@@ -495,14 +512,13 @@ export function ensureAdminBus() {
 
       state.folderCache.delete(state.currentPath);
       await openFolder(state.currentPath, { force: true });
+      await fetchFavorites().catch(() => {});
       setStatus('真实删除完成。', 'success');
       return;
     }
 
     const endpoint = {
       like: 'toggleLike',
-      white: 'white',
-      block: 'block',
       delete: 'delete',
       'delete-kv': 'deleteKv'
     }[action];
@@ -520,6 +536,7 @@ export function ensureAdminBus() {
     const message = payload?.warning || payload?.message || (action === 'delete-kv' ? '仅删 KV 完成。' : `${action} 完成。`);
     state.folderCache.delete(state.currentPath);
     await openFolder(state.currentPath, { force: true });
+    await fetchFavorites().catch(() => {});
     setStatus(message, payload?.warning ? 'busy' : 'success');
   };
 
@@ -765,6 +782,19 @@ export function ensureAdminBus() {
       return payload;
   };
 
+  const openFavoriteItem = async (item, { openFile = false } = {}) => {
+    if (!item) return;
+
+    if (item.folderPath) {
+      await openFolder(item.folderPath, { force: true });
+      selectItem(item.name);
+    }
+
+    if (openFile) {
+      window.open(item.url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const refreshFolderAfterUpload = async (task) => {
     state.folderCache.delete(task.path);
     const parentPath = getParentPath(task.path);
@@ -828,6 +858,7 @@ export function ensureAdminBus() {
       });
 
       await refreshFolderAfterUpload(state.uploadTasks.find((item) => item.id === taskId));
+      await fetchFavorites().catch(() => {});
 
       if (payload?.pending) {
         setStatus(`已提交 ${task.fileName} 到 Telegram，等待 webhook 收录到 ${task.path} ...`, 'busy');
@@ -933,6 +964,8 @@ export function ensureAdminBus() {
     retryUploadTask,
     removeUploadTask,
     getUploadTasks,
+    fetchFavorites,
+    openFavoriteItem,
     scrollToTop,
     scrollToBottom,
     selectItem,

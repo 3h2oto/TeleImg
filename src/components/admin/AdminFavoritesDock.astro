@@ -1,0 +1,149 @@
+<aside class="admin-favorites-dock" data-admin-favorites-dock>
+  <div class="admin-favorites-dock__panel">
+    <div class="admin-favorites-dock__header">
+      <strong>收藏列表</strong>
+      <span class="meta-chip" data-role="favorite-count">收藏：0</span>
+    </div>
+
+    <div class="admin-favorites-dock__list" data-role="favorite-list">
+      <div class="empty-state compact">当前还没有收藏文件。</div>
+    </div>
+  </div>
+</aside>
+
+<script>
+  // @ts-nocheck
+  import { ensureAdminBus, formatBytes, formatTime } from '../../scripts/admin-bus.js';
+
+  document.querySelectorAll('[data-admin-favorites-dock]').forEach((root) => {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const bus = ensureAdminBus();
+    const countChip = root.querySelector('[data-role="favorite-count"]');
+    const listRoot = root.querySelector('[data-role="favorite-list"]');
+
+    const renderItem = (item) => `
+      <article class="favorite-card">
+        <div class="favorite-card__copy">
+          <strong title="${item.metadata?.fileName || item.name}">${item.metadata?.fileName || item.name}</strong>
+          <span class="muted-text" title="${item.folderPath || '/'}">${item.folderPath || '/'}</span>
+          <span class="muted-text">${formatBytes(item.metadata?.fileSize)} · ${formatTime(item.metadata?.TimeStamp)}</span>
+        </div>
+        <div class="favorite-card__buttons">
+          <button type="button" class="ghost-button" data-action="jump-favorite" data-key="${item.name}">跳转</button>
+          <button type="button" class="ghost-button" data-action="open-favorite" data-key="${item.name}">打开</button>
+          <button type="button" class="ghost-button" data-action="unfavorite" data-key="${item.name}">取消收藏</button>
+        </div>
+      </article>
+    `;
+
+    const render = (state) => {
+      const items = Array.isArray(state.favoriteItems) ? state.favoriteItems : [];
+      countChip.textContent = `收藏：${items.length}`;
+      listRoot.innerHTML = items.length
+        ? items.map((item) => renderItem(item)).join('')
+        : '<div class="empty-state compact">当前还没有收藏文件。</div>';
+    };
+
+    root.addEventListener('click', async (event) => {
+      const button = event.target instanceof Element ? event.target.closest('button[data-action]') : null;
+      if (!button) return;
+
+      const item = bus.state.favoriteItems.find((entry) => entry.name === button.dataset.key);
+      if (!item) return;
+
+      try {
+        if (button.dataset.action === 'jump-favorite') {
+          await bus.openFavoriteItem(item, { openFile: false });
+          return;
+        }
+
+        if (button.dataset.action === 'open-favorite') {
+          await bus.openFavoriteItem(item, { openFile: true });
+          return;
+        }
+
+        if (button.dataset.action === 'unfavorite') {
+          await bus.performItemAction('like', item.name);
+        }
+      } catch (error) {
+        bus.setStatus(error instanceof Error ? error.message : '收藏浮岛操作失败。', 'error');
+      }
+    });
+
+    bus.subscribe(render);
+    void bus.start();
+  });
+</script>
+
+<style>
+  .admin-favorites-dock {
+    width: 100%;
+    pointer-events: none;
+  }
+
+  .admin-favorites-dock__panel {
+    pointer-events: auto;
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 22px;
+    border: 1px solid rgba(168, 255, 96, 0.14);
+    background: rgba(10, 10, 10, 0.94);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
+    backdrop-filter: blur(12px);
+  }
+
+  .admin-favorites-dock__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .admin-favorites-dock__list {
+    display: grid;
+    gap: 10px;
+    max-height: min(34vh, 360px);
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .favorite-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(168, 255, 96, 0.10);
+    background: #0d0d0d;
+  }
+
+  .favorite-card__copy {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .favorite-card__copy strong,
+  .favorite-card__copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .favorite-card__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .empty-state.compact {
+    padding: 14px;
+    border-radius: 16px;
+    background: #0d0d0d;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    text-align: center;
+  }
+</style>

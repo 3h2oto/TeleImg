@@ -60,7 +60,6 @@
 
     const renderCard = (item, selected) => {
       const badges = [
-        item.metadata?.ListType,
         item.metadata?.Label,
         item.metadata?.liked ? 'liked' : null,
         item.metadata?.source || null,
@@ -96,8 +95,6 @@
             <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
             <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
             <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
-            <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
-            <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
             <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
             <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
           </div>
@@ -138,8 +135,6 @@
           <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
           <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
           <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
-          <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
-          <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
           <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
           <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
         </div>
@@ -259,7 +254,7 @@
         return;
       }
 
-      if (['like', 'white', 'block'].includes(action)) {
+      if (['like'].includes(action)) {
         await bus.performItemAction(action, item.name);
       }
     };

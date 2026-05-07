@@ -160,11 +160,7 @@
 
 <style>
   .admin-utility-dock {
-    position: fixed;
-    right: 24px;
-    bottom: 24px;
-    z-index: 40;
-    width: min(360px, calc(100vw - 32px));
+    width: 100%;
     pointer-events: none;
   }
 
@@ -291,14 +287,5 @@
     background: #0d0d0d;
     border: 1px solid rgba(168, 255, 96, 0.08);
     text-align: center;
-  }
-
-  @media (max-width: 900px) {
-    .admin-utility-dock {
-      right: 12px;
-      left: 12px;
-      width: auto;
-      bottom: 12px;
-    }
   }
 </style>

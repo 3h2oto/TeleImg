@@ -225,6 +225,38 @@ export async function listRecords(env, { limit = 100, cursor, prefix, search } =
   };
 }
 
+export async function listFavoriteRecords(env, { limit = 20 } = {}) {
+  const safeLimit = Math.max(1, Math.min(Number.parseInt(String(limit), 10) || 20, 100));
+  const pageSize = 1000;
+  const maxScanned = 10000;
+  let currentCursor;
+  let scanned = 0;
+  let done = false;
+  const matches = [];
+
+  while (!done && scanned < maxScanned) {
+    const page = await env.img_url.list({ limit: pageSize, cursor: currentCursor });
+    currentCursor = page.cursor;
+    scanned += page.keys.length;
+
+    const enrichedEntries = await Promise.all(page.keys.map((entry) => getEnrichedRecord(env, entry.name, entry)));
+    for (const enriched of enrichedEntries) {
+      if (!enriched || isInternalKey(enriched.name) || !enriched.metadata?.liked) {
+        continue;
+      }
+      matches.push(enriched);
+    }
+
+    done = page.list_complete;
+  }
+
+  matches.sort((left, right) => right.metadata.TimeStamp - left.metadata.TimeStamp);
+  return {
+    keys: matches.slice(0, safeLimit),
+    scanned
+  };
+}
+
 export async function findRecordByTelegramMessage(env, chatId, messageId, { maxScanned = 5000 } = {}) {
   const normalizedChatId = chatId == null ? '' : String(chatId);
   const normalizedMessageId = Number.parseInt(String(messageId), 10);

@@ -4,6 +4,7 @@ import { onRequest as browseDav } from '../functions/api/manage/dav/browse.js';
 import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[id].js';
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
+import { onRequest as favorites } from '../functions/api/manage/favorites.js';
 import { onRequest as list } from '../functions/api/manage/list.js';
 import { __test as mtprotoUploadTest, onRequest as mtprotoUpload } from '../functions/api/manage/mtproto/upload.js';
 import { onRequest as bridgeWarmup } from '../functions/api/manage/telegram/bridge-warmup.js';
@@ -79,6 +80,49 @@ describe('manage endpoints', () => {
     const payload = await response.json();
     expect(payload.keys).toHaveLength(1);
     expect(payload.keys[0].name).toBe('one.png');
+  });
+
+  it('returns favorite records with DAV path metadata', async () => {
+    const env = {
+      img_url: createKv({
+        'fav-1.jpg': {
+          fileName: 'cover.jpg',
+          liked: true,
+          fileSize: 64,
+          TimeStamp: 10
+        },
+        'fav-2.jpg': {
+          fileName: 'other.jpg',
+          liked: false,
+          fileSize: 32,
+          TimeStamp: 5
+        },
+        [getDavEntryKey('/albums/cover.jpg')]: {
+          value: JSON.stringify({
+            kind: 'file',
+            path: '/albums/cover.jpg',
+            name: 'cover.jpg',
+            storageKey: 'fav-1.jpg',
+            size: 64,
+            contentType: 'image/jpeg',
+            createdAt: 10,
+            updatedAt: 10
+          })
+        }
+      })
+    };
+
+    const response = await favorites({
+      env,
+      request: new Request('https://example.com/api/manage/favorites?limit=10')
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.count).toBe(1);
+    expect(payload.items[0].name).toBe('fav-1.jpg');
+    expect(payload.items[0].davPath).toBe('/albums/cover.jpg');
+    expect(payload.items[0].folderPath).toBe('/albums');
   });
 
   it('prefers fresh getWithMetadata over stale list metadata', async () => {
