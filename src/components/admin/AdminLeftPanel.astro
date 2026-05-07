@@ -1,0 +1,216 @@
+<aside class="admin-pane admin-pane--left" data-admin-left>
+  <div class="admin-pane__rail">
+    <button type="button" class="admin-pane__toggle" data-action="toggle-panel" aria-expanded="true" aria-label="折叠左侧功能栏">
+      ◀
+    </button>
+  </div>
+
+  <div class="admin-pane__content">
+    <div class="admin-pane__hero">
+      <span class="eyebrow">Dashboard</span>
+      <h1>TeleImg Admin</h1>
+    </div>
+
+    <section class="admin-pane__group">
+      <div class="admin-pane__group-head">
+        <strong>快捷入口</strong>
+      </div>
+      <div class="admin-pane__buttons">
+        <a class="ghost-button link-button" href="/api/manage/logout">重新认证</a>
+        <a class="ghost-button link-button" href="/">返回首页</a>
+      </div>
+    </section>
+
+    <section class="admin-pane__group">
+      <div class="admin-pane__group-head">
+        <strong>系统动作</strong>
+      </div>
+      <div class="admin-pane__buttons">
+        <button type="button" class="ghost-button" data-action="refresh-folder">刷新当前目录</button>
+        <button type="button" class="ghost-button" data-action="toggle-view">切换视图</button>
+      </div>
+      <div class="admin-pane__chips" data-role="workspace-chips"></div>
+    </section>
+
+    <section class="admin-pane__group">
+      <div class="admin-pane__group-head">
+        <strong>Telegram / 桥接</strong>
+      </div>
+      <div class="admin-pane__buttons">
+        <button type="button" class="ghost-button" data-action="telegram-status">Telegram 状态</button>
+        <button type="button" class="ghost-button" data-action="bridge-warmup">桥接自检</button>
+        <button type="button" class="ghost-button" data-action="telegram-sync">同步直传</button>
+        <button type="button" class="ghost-button" data-action="telegram-webhook">配置 Webhook</button>
+      </div>
+      <div class="admin-pane__chips" data-role="telegram-chips"></div>
+      <section class="bridge-panel admin-pane__bridge" data-role="bridge-panel">
+        <div class="bridge-panel__header">
+          <strong>大文件桥接状态</strong>
+          <span class="meta-chip">等待状态刷新</span>
+        </div>
+        <p class="muted-text">桥接状态会显示在这里。</p>
+      </section>
+    </section>
+  </div>
+</aside>
+
+<script>
+  // @ts-nocheck
+  import { ensureAdminBus, formatTime } from '../../scripts/admin-bus.js';
+
+  document.querySelectorAll('[data-admin-left]').forEach((root) => {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const bus = ensureAdminBus();
+    const chips = root.querySelector('[data-role="workspace-chips"]');
+    const telegramChips = root.querySelector('[data-role="telegram-chips"]');
+    const bridgePanel = root.querySelector('[data-role="bridge-panel"]');
+    let collapsed = false;
+
+    const renderBridgePanel = (bridge) => {
+      if (!bridge?.configured) {
+        bridgePanel.innerHTML = `
+          <div class="bridge-panel__header">
+            <strong>大文件桥接状态</strong>
+            <span class="meta-chip">未配置</span>
+          </div>
+          <p class="muted-text">当前主站没有配置 MTProto 大文件桥接。</p>
+        `;
+        return;
+      }
+
+      const tone = bridge.ok ? 'ok' : 'error';
+      const health = bridge.health || {};
+      const rows = [
+        ['后端', bridge.backend === 'workers-free' ? 'Workers Free' : '外置桥接'],
+        ['域名', bridge.host || '未知'],
+        ['桥连接', health.connected === undefined ? '未知' : (health.connected ? '已连' : '未连')],
+        ['桥授权', health.authorized === undefined ? '未知' : (health.authorized ? '已授权' : '未授权')],
+        ['最近下载', health.lastDownloadAt ? formatTime(health.lastDownloadAt) : '无'],
+        ['错误', bridge.error || health.lastError || '无']
+      ];
+
+      bridgePanel.innerHTML = `
+        <div class="bridge-panel__header">
+          <strong>大文件桥接状态</strong>
+          <span class="meta-chip bridge-panel__tone" data-tone="${tone}">${bridge.ok ? '在线' : '异常'}</span>
+        </div>
+        <dl class="bridge-panel__grid">
+          ${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}
+        </dl>
+      `;
+    };
+
+    const render = (state) => {
+      const filtered = bus.getFilteredItems();
+      const selected = bus.getSelectedItem();
+      chips.innerHTML = [
+        `视图：${state.view}`,
+        `当前目录：${state.currentPath}`,
+        `当前结果：${filtered.length}`,
+        selected ? `已选中文件：${selected.metadata?.fileName || selected.davName || selected.name}` : '已选中文件：无'
+      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+
+      const telegram = state.telegramStatus;
+      const bridge = telegram?.bridge;
+      const chipsList = [
+        telegram?.bot?.username ? `Bot：@${telegram.bot.username}` : null,
+        telegram?.webhook?.url ? `Webhook：${telegram.webhook.url}` : 'Webhook：未配置',
+        Number.isFinite(telegram?.webhook?.pending_update_count) ? `Pending：${telegram.webhook.pending_update_count}` : null,
+        bridge?.configured ? `桥接域名：${bridge.host || '未知'}` : '大文件桥：未配置',
+        telegram?.syncState?.lastWebhookAt ? `最近 webhook：${formatTime(telegram.syncState.lastWebhookAt)}` : null,
+        telegram?.syncState?.lastSyncAt ? `最近 sync：${formatTime(telegram.syncState.lastSyncAt)}` : null
+      ].filter(Boolean);
+      telegramChips.innerHTML = chipsList.map((text) => `<span class="meta-chip">${text}</span>`).join('');
+      renderBridgePanel(bridge);
+    };
+
+    bus.subscribe(render);
+    void bus.start();
+
+    root.addEventListener('click', async (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest('button[data-action]');
+      if (!button) return;
+
+      const action = button.dataset.action;
+      if (action === 'toggle-panel') {
+        collapsed = !collapsed;
+        root.classList.toggle('is-collapsed', collapsed);
+        button.textContent = collapsed ? '▶' : '◀';
+        button.setAttribute('aria-expanded', String(!collapsed));
+        return;
+      }
+
+      try {
+        if (action === 'refresh-folder') {
+          await bus.refreshCurrentFolder();
+          return;
+        }
+
+        if (action === 'toggle-view') {
+          bus.toggleView();
+          return;
+        }
+
+        if (['telegram-status', 'bridge-warmup', 'telegram-sync', 'telegram-webhook'].includes(action)) {
+          await bus.triggerTelegramAction(action);
+        }
+      } catch (error) {
+        bus.setStatus(error instanceof Error ? error.message : '左侧功能执行失败。', 'error');
+      }
+    });
+  });
+</script>
+
+<style>
+  .admin-pane--left {
+    width: 320px;
+    transition: width 0.28s ease;
+  }
+
+  .admin-pane--left.is-collapsed {
+    width: 68px;
+  }
+
+  .admin-pane--left .admin-pane__content {
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .admin-pane--left.is-collapsed .admin-pane__content {
+    opacity: 0;
+    transform: translateX(-12px);
+    pointer-events: none;
+  }
+
+  .admin-pane--left .admin-pane__hero h1 {
+    margin: 12px 0 0;
+    font-size: clamp(2.2rem, 2.8vw, 3.3rem);
+    line-height: 0.98;
+  }
+
+  .admin-pane--left .admin-pane__buttons {
+    display: grid;
+    gap: 10px;
+  }
+
+  .admin-pane--left .admin-pane__buttons .ghost-button {
+    width: 100%;
+  }
+
+  .admin-pane__group + .admin-pane__group {
+    margin-top: 18px;
+  }
+
+  .admin-pane__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .admin-pane__bridge {
+    margin-top: 14px;
+  }
+</style>

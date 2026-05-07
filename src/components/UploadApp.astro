@@ -1,13 +1,3 @@
----
-interface Props {
-  title?: string;
-}
-
-const {
-  title = 'TeleImg'
-} = Astro.props;
----
-
 <section class="telegraph-page" data-landing-app>
   <div class="telegraph-background" aria-hidden="true">
     <div class="telegraph-background-slider" data-role="background-slider"></div>
@@ -24,20 +14,7 @@ const {
     </a>
   </div>
 
-  <div class="telegraph-main">
-    <div class="telegraph-hero-card">
-      <span class="telegraph-eyebrow">Telegraph-style image host</span>
-      <div class="telegraph-title">{title}</div>
-      <p class="telegraph-copy">
-        首页不再直接上传。请使用右上角进入 <code>/admin</code>，或通过 WebDAV 挂载来浏览、整理和管理文件。
-      </p>
-      <div class="telegraph-meta-row">
-        <span>背景轮播保留</span>
-        <span>右上角可直达管理台</span>
-        <span>适合 WebDAV / Admin 双入口</span>
-      </div>
-    </div>
-  </div>
+  <div class="telegraph-main" aria-hidden="true"></div>
 </section>
 
 <script is:inline>
@@ -155,86 +132,12 @@ const {
   }
 
   .telegraph-main {
-    display: grid;
     min-height: calc(100vh - 60px);
-    place-items: center;
-    padding: 30px 0;
-  }
-
-  .telegraph-hero-card {
-    width: min(640px, calc(100vw - 48px));
-    padding: 36px 34px;
-    border-radius: 28px;
-    background: rgba(8, 8, 8, 0.52);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(18px);
-    color: #fff;
-    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.3);
-  }
-
-  .telegraph-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    min-height: 30px;
-    padding: 0 12px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.1);
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .telegraph-title {
-    font-family: "阿里妈妈数黑体 Bold", Inter, system-ui, sans-serif;
-    color: #fff;
-    font-size: clamp(40px, 8vw, 72px);
-    font-weight: 700;
-    line-height: 1.02;
-    padding: 18px 0 14px;
-  }
-
-  .telegraph-copy {
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.8;
-    color: rgba(255, 255, 255, 0.78);
-  }
-
-  .telegraph-copy code {
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.09);
-    color: #fff;
-  }
-
-  .telegraph-meta-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 24px;
-  }
-
-  .telegraph-meta-row span {
-    display: inline-flex;
-    align-items: center;
-    min-height: 32px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.82);
-    font-size: 13px;
   }
 
   @media (max-width: 520px) {
     .telegraph-page {
       padding: 18px;
-    }
-
-    .telegraph-hero-card {
-      width: min(100%, calc(100vw - 24px));
-      padding: 28px 22px;
-      border-radius: 22px;
     }
   }
 </style>

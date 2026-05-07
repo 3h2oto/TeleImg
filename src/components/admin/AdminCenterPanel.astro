@@ -1,0 +1,496 @@
+<main class="admin-stage" data-admin-center>
+  <div class="admin-stage__sticky">
+    <div class="admin-stage__topline">
+      <div class="admin-breadcrumbs" data-role="breadcrumbs"></div>
+      <div class="admin-folder-context" data-role="folder-context"></div>
+    </div>
+
+    <form class="search-bar admin-search-bar" data-role="search-form">
+      <input type="search" name="search" placeholder="按 key、文件名、caption、聊天标题搜索当前目录（按 / 聚焦）" autocomplete="off" />
+      <button type="submit" class="primary-button">搜索</button>
+      <button type="button" class="ghost-button" data-action="reset-search">清空</button>
+    </form>
+  </div>
+
+  <p class="status-line" data-role="status">正在加载...</p>
+  <div class="summary-row admin-folder-summary" data-role="summary"></div>
+
+  <section class="details-drawer is-empty" data-role="details">
+    <div class="details-drawer__empty">
+      <strong>未选中文件</strong>
+      <p class="muted-text">点击卡片可选中，双击打开；支持方向键切换、Enter 打开、Backspace 返回上级目录。</p>
+    </div>
+  </section>
+
+  <div class="admin-grid explorer-grid" data-role="grid"></div>
+</main>
+
+<script>
+  // @ts-nocheck
+  import {
+    ensureAdminBus,
+    buildBreadcrumbs,
+    formatBytes,
+    formatTime,
+    isAudio,
+    isVideo
+  } from '../../scripts/admin-bus.js';
+
+  document.querySelectorAll('[data-admin-center]').forEach((root) => {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const bus = ensureAdminBus();
+    const status = root.querySelector('[data-role="status"]');
+    const summary = root.querySelector('[data-role="summary"]');
+    const details = root.querySelector('[data-role="details"]');
+    const grid = root.querySelector('[data-role="grid"]');
+    const form = root.querySelector('[data-role="search-form"]');
+    const breadcrumbs = root.querySelector('[data-role="breadcrumbs"]');
+    const folderContext = root.querySelector('[data-role="folder-context"]');
+
+    const renderCard = (item, selected) => {
+      const badges = [
+        item.metadata?.ListType,
+        item.metadata?.Label,
+        item.metadata?.liked ? 'liked' : null,
+        item.metadata?.source || null,
+        item.metadata?.telegram?.mediaKind || null
+      ]
+        .filter((value) => value && value !== 'None')
+        .map((value) => `<span class="badge">${value}</span>`)
+        .join('');
+
+      const preview = isVideo(item.name)
+        ? `<video controls preload="metadata" src="${item.url}"></video>`
+        : isAudio(item.name)
+          ? `<div class="audio-card"><span>🎵</span><a href="${item.url}" target="_blank" rel="noreferrer">播放 / 打开</a></div>`
+          : `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.davName || item.name}" />`;
+
+      return `
+        <article class="media-card explorer-card${selected ? ' is-selected' : ''}" data-key="${item.name}" tabindex="0" role="button" aria-pressed="${selected ? 'true' : 'false'}">
+          <div class="preview-frame">${preview}</div>
+          <div class="media-copy">
+            <strong title="${item.metadata?.fileName || item.davName || item.name}">${item.metadata?.fileName || item.davName || item.name}</strong>
+            <p class="muted-text">${item.name}</p>
+            <div class="meta-chip-row">
+              <span class="meta-chip">${item.davPath || '未绑定 DAV 路径'}</span>
+            </div>
+            <div class="badge-row">${badges || '<span class="badge muted">None</span>'}</div>
+            <dl>
+              <div><dt>时间</dt><dd>${formatTime(item.metadata?.TimeStamp)}</dd></div>
+              <div><dt>大小</dt><dd>${formatBytes(item.metadata?.fileSize)}</dd></div>
+              <div><dt>聊天</dt><dd>${item.metadata?.telegram?.chatTitle || item.metadata?.telegram?.chatId || '未记录'}</dd></div>
+            </dl>
+          </div>
+          <div class="toolbar-row compact">
+            <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
+            <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
+            <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
+            <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
+            <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
+            <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
+            <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
+          </div>
+        </article>
+      `;
+    };
+
+    const renderDetails = (item) => {
+      if (!item) {
+        details.className = 'details-drawer is-empty';
+        details.innerHTML = `
+          <div class="details-drawer__empty">
+            <strong>未选中文件</strong>
+            <p class="muted-text">点击卡片可选中，双击打开；支持方向键切换、Enter 打开、Backspace 返回上级目录。</p>
+          </div>
+        `;
+        return;
+      }
+
+      const telegram = item.metadata?.telegram;
+      details.className = 'details-drawer';
+      details.innerHTML = `
+        <div class="details-drawer__preview">
+          ${isVideo(item.name)
+            ? `<video controls preload="metadata" src="${item.url}"></video>`
+            : isAudio(item.name)
+              ? `<div class="audio-card details-drawer__audio"><span>🎵</span><a href="${item.url}" target="_blank" rel="noreferrer">播放 / 打开</a></div>`
+              : `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.name}" />`}
+        </div>
+        <div class="details-drawer__copy">
+          <div class="details-drawer__head">
+            <div>
+              <strong>${item.metadata?.fileName || item.davName || item.name}</strong>
+              <p class="muted-text">${item.name}</p>
+            </div>
+            <div class="toolbar-row compact">
+              <button type="button" class="ghost-button" data-action="open-selected">打开</button>
+              <button type="button" class="ghost-button" data-action="clear-selection">取消选择</button>
+            </div>
+          </div>
+          <div class="meta-chip-row">
+            <span class="meta-chip">${item.davPath || '/'}</span>
+            <span class="meta-chip">${formatBytes(item.metadata?.fileSize)}</span>
+            <span class="meta-chip">${formatTime(item.metadata?.TimeStamp)}</span>
+          </div>
+          <dl class="details-drawer__meta">
+            <div><dt>来源</dt><dd>${item.metadata?.source || 'unknown'}</dd></div>
+            <div><dt>聊天</dt><dd>${telegram?.chatTitle || telegram?.chatId || '未记录'}</dd></div>
+            <div><dt>消息</dt><dd>${telegram?.messageId || '未记录'}</dd></div>
+            <div><dt>远端删除</dt><dd>${item.canDeleteTelegram ? '支持' : '仅删 KV'}</dd></div>
+          </dl>
+          <div class="toolbar-row details-drawer__actions">
+            <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
+            <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
+            <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
+            <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
+            <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
+            <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
+            <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
+          </div>
+        </div>
+      `;
+    };
+
+    const render = (state) => {
+      form.search.value = state.search;
+      status.textContent = state.statusMessage;
+      status.dataset.tone = state.statusTone;
+      grid.dataset.view = state.view;
+
+      const selected = bus.getSelectedItem();
+      const filtered = bus.getFilteredItems();
+      const crumbs = buildBreadcrumbs(state.currentPath);
+      const counts = state.currentBrowse?.counts || { folders: 0, files: 0 };
+
+      breadcrumbs.innerHTML = crumbs.map((crumb, index) => {
+        const isLast = index === crumbs.length - 1;
+        return `
+          <button type="button" class="breadcrumb-chip${isLast ? ' is-current' : ''}" data-action="open-folder" data-path="${crumb.path}">
+            ${crumb.label}
+          </button>
+        `;
+      }).join('<span class="breadcrumb-sep">/</span>');
+
+      folderContext.innerHTML = [
+        `当前目录：${state.currentPath}`,
+        `子目录：${counts.folders}`,
+        `文件：${counts.files}`,
+        `搜索：${state.search || '全部'}`
+      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+
+      summary.innerHTML = [
+        `当前目录文件：${filtered.length}`,
+        `可远端删除：${filtered.filter((item) => item.canDeleteTelegram).length}`,
+        selected ? `已选中：${selected.metadata?.fileName || selected.davName || selected.name}` : '已选中：无'
+      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
+
+      grid.innerHTML = filtered.length
+        ? filtered.map((item) => renderCard(item, selected?.name === item.name)).join('')
+        : '<div class="empty-state">当前目录下没有匹配文件。</div>';
+
+      renderDetails(selected);
+    };
+
+    const renameItem = async (item) => {
+      const nextName = window.prompt('新的文件名', item?.davName || item?.metadata?.fileName || item?.name || '');
+      if (!nextName) return;
+      await bus.moveDavFile(item, nextName.trim());
+    };
+
+    const deleteItem = async (item, kvOnly = false) => {
+      if (!item) return;
+      const confirmed = window.confirm(kvOnly
+        ? `确认仅删除 ${item.name} 的 KV 记录？`
+        : `确认删除 ${item.name}？若记录里带有 Telegram message_id，将同时删除 Telegram 原消息。`);
+      if (!confirmed) return;
+
+      try {
+        await bus.performItemAction(kvOnly ? 'delete-kv' : 'delete', item.name);
+      } catch (error) {
+        if (!kvOnly) {
+          const shouldFallback = window.confirm(`${error instanceof Error ? error.message : '真实删除失败。'}
+
+是否回退为“仅删KV”？`);
+          if (shouldFallback) {
+            await bus.performItemAction('delete-kv', item.name);
+            return;
+          }
+        }
+        throw error;
+      }
+    };
+
+    const handleAction = async (action, key) => {
+      const item = key ? bus.state.currentItems.find((entry) => entry.name === key) : bus.getSelectedItem();
+      if (!item && !['clear-selection', 'open-selected', 'reset-search'].includes(action)) return;
+
+      if (action === 'open-selected') {
+        bus.openSelectedItem();
+        return;
+      }
+
+      if (action === 'clear-selection') {
+        bus.selectItem(null);
+        return;
+      }
+
+      if (action === 'reset-search') {
+        bus.setSearch('');
+        return;
+      }
+
+      if (action === 'copy') {
+        await bus.copyFileUrl(item.name);
+        return;
+      }
+
+      if (action === 'rename') {
+        await renameItem(item);
+        return;
+      }
+
+      if (action === 'delete') {
+        await deleteItem(item, false);
+        return;
+      }
+
+      if (action === 'delete-kv') {
+        await deleteItem(item, true);
+        return;
+      }
+
+      if (['like', 'white', 'block'].includes(action)) {
+        await bus.performItemAction(action, item.name);
+      }
+    };
+
+    bus.subscribe(render);
+    void bus.start();
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      bus.setSearch(form.search.value);
+    });
+
+    form.search.addEventListener('input', () => {
+      bus.setSearch(form.search.value);
+    });
+
+    root.addEventListener('click', async (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const actionButton = target?.closest('button[data-action]');
+      if (actionButton) {
+        try {
+          const action = actionButton.dataset.action;
+          if (action === 'open-folder' && actionButton.dataset.path) {
+            await bus.openFolder(actionButton.dataset.path);
+            return;
+          }
+          await handleAction(action, actionButton.dataset.key);
+        } catch (error) {
+          bus.setStatus(error instanceof Error ? error.message : '文件操作失败。', 'error');
+        }
+        return;
+      }
+
+      const card = target?.closest('[data-key]');
+      if (card) {
+        bus.selectItem(card.dataset.key);
+      }
+    });
+
+    root.addEventListener('dblclick', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const card = target?.closest('[data-key]');
+      if (!card) return;
+      bus.selectItem(card.dataset.key);
+      bus.openSelectedItem();
+    });
+
+    window.addEventListener('keydown', (event) => {
+      const active = document.activeElement;
+      const editable = active instanceof HTMLElement
+        && (active.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName));
+
+      if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !editable) {
+        event.preventDefault();
+        form.search.focus();
+        form.search.select();
+        return;
+      }
+
+      if (editable) return;
+
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        bus.navigateSelection(1);
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        bus.navigateSelection(-1);
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        bus.openSelectedItem();
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        const parentPath = bus.state.currentPath !== '/' ? bus.state.currentPath.split('/').slice(0, -1).join('/') || '/' : null;
+        if (parentPath) {
+          event.preventDefault();
+          void bus.openFolder(parentPath);
+        }
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        bus.selectItem(null);
+      }
+    });
+  });
+</script>
+
+<style>
+  .admin-stage {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    gap: 16px;
+    min-height: calc(100vh - 120px);
+  }
+
+  .admin-stage__sticky {
+    position: sticky;
+    top: 12px;
+    z-index: 5;
+    display: grid;
+    gap: 12px;
+    padding-bottom: 8px;
+    background: linear-gradient(180deg, rgba(9, 9, 9, 0.98), rgba(9, 9, 9, 0.92) 72%, rgba(9, 9, 9, 0));
+  }
+
+  .admin-stage__topline {
+    display: grid;
+    gap: 10px;
+  }
+
+  .details-drawer {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 18px;
+    padding: 16px;
+    border-radius: 22px;
+    border: 1px solid rgba(168, 255, 96, 0.1);
+    background: #0b0b0b;
+  }
+
+  .details-drawer.is-empty {
+    display: block;
+  }
+
+  .details-drawer__empty {
+    padding: 8px 6px;
+  }
+
+  .details-drawer__preview {
+    overflow: hidden;
+    border-radius: 18px;
+    background: #050505;
+    min-height: 180px;
+    display: grid;
+    place-items: center;
+  }
+
+  .details-drawer__preview img,
+  .details-drawer__preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .details-drawer__copy {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .details-drawer__head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .details-drawer__head strong {
+    font-size: 1.35rem;
+  }
+
+  .details-drawer__head p {
+    margin: 6px 0 0;
+    word-break: break-all;
+  }
+
+  .details-drawer__meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+  }
+
+  .details-drawer__meta div {
+    border-radius: 14px;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    background: #101010;
+    padding: 12px 14px;
+  }
+
+  .details-drawer__meta dt {
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+
+  .details-drawer__meta dd {
+    margin: 0;
+    word-break: break-word;
+  }
+
+  .details-drawer__actions {
+    gap: 10px;
+  }
+
+  .explorer-grid {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  }
+
+  .explorer-card {
+    outline: none;
+    transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+    cursor: pointer;
+  }
+
+  .explorer-card:hover,
+  .explorer-card:focus-visible {
+    transform: translateY(-2px);
+    border-color: rgba(57, 242, 174, 0.2);
+  }
+
+  .explorer-card.is-selected {
+    border-color: rgba(57, 242, 174, 0.38);
+    box-shadow: 0 0 0 1px rgba(57, 242, 174, 0.18), 0 14px 42px rgba(0, 0, 0, 0.24);
+  }
+
+  @media (max-width: 1100px) {
+    .details-drawer {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

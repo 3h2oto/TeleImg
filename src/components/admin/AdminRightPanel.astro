@@ -1,0 +1,236 @@
+<aside class="admin-pane admin-pane--right" data-admin-right>
+  <div class="admin-pane__rail admin-pane__rail--right">
+    <button type="button" class="admin-pane__toggle" data-action="toggle-panel" aria-expanded="true" aria-label="折叠右侧目录栏">
+      ▶
+    </button>
+  </div>
+
+  <div class="admin-pane__content">
+    <div class="admin-pane__hero admin-pane__hero--compact">
+      <span class="eyebrow">WebDAV</span>
+      <h2>目录树</h2>
+    </div>
+
+    <section class="admin-pane__group">
+      <div class="admin-pane__group-head">
+        <strong>目录操作</strong>
+      </div>
+      <div class="admin-pane__buttons">
+        <button type="button" class="ghost-button" data-action="root-folder">根目录</button>
+        <button type="button" class="ghost-button" data-action="new-folder">新建目录</button>
+        <button type="button" class="ghost-button danger" data-action="delete-folder">删除当前目录</button>
+      </div>
+    </section>
+
+    <section class="admin-pane__group">
+      <div class="admin-pane__group-head">
+        <strong>目录树跳转</strong>
+      </div>
+      <div class="folder-tree-panel">
+        <div class="folder-tree-panel__summary" data-role="folder-summary"></div>
+        <div class="folder-tree" data-role="folder-tree"></div>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<script>
+  // @ts-nocheck
+  import { ensureAdminBus } from '../../scripts/admin-bus.js';
+
+  document.querySelectorAll('[data-admin-right]').forEach((root) => {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const bus = ensureAdminBus();
+    const tree = root.querySelector('[data-role="folder-tree"]');
+    const summary = root.querySelector('[data-role="folder-summary"]');
+    let collapsed = false;
+
+    const renderNode = (state, node) => {
+      const cached = state.folderCache.get(node.path);
+      const children = cached?.folders || [];
+      const expanded = state.expandedFolders.has(node.path);
+      const active = state.currentPath === node.path;
+      return `
+        <li class="folder-tree__item">
+          <div class="folder-tree__row${active ? ' is-active' : ''}">
+            <button type="button" class="folder-tree__toggle" data-action="toggle-folder" data-path="${node.path}">
+              ${expanded ? '▾' : '▸'}
+            </button>
+            <button type="button" class="folder-tree__link" data-action="open-folder" data-path="${node.path}">
+              <span class="folder-tree__icon">${expanded ? '📂' : '📁'}</span>
+              <span class="folder-tree__label">${node.name}</span>
+            </button>
+          </div>
+          ${expanded && children.length ? `<ul class="folder-tree__children">${children.map((child) => renderNode(state, child)).join('')}</ul>` : ''}
+        </li>
+      `;
+    };
+
+    const render = (state) => {
+      const current = state.currentBrowse;
+      summary.innerHTML = [
+        `当前目录：${state.currentPath}`,
+        current ? `子目录：${current.counts?.folders || 0}` : null,
+        current ? `文件：${current.counts?.files || 0}` : null
+      ].filter(Boolean).map((text) => `<span class="meta-chip">${text}</span>`).join('');
+
+      const rootNode = { path: '/', name: '根目录' };
+      tree.innerHTML = `<ul class="folder-tree__root">${renderNode(state, rootNode)}</ul>`;
+    };
+
+    bus.subscribe(render);
+    void bus.start();
+
+    root.addEventListener('click', async (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest('button[data-action]');
+      if (!button) return;
+
+      const action = button.dataset.action;
+      const path = button.dataset.path;
+
+      if (action === 'toggle-panel') {
+        collapsed = !collapsed;
+        root.classList.toggle('is-collapsed', collapsed);
+        button.textContent = collapsed ? '◀' : '▶';
+        button.setAttribute('aria-expanded', String(!collapsed));
+        return;
+      }
+
+      try {
+        if (action === 'root-folder') {
+          await bus.openFolder('/', { force: true });
+          return;
+        }
+
+        if (action === 'new-folder') {
+          const requestedName = window.prompt('新目录名称（创建在当前目录下）', '');
+          if (!requestedName) return;
+          await bus.createFolder(requestedName);
+          return;
+        }
+
+        if (action === 'delete-folder') {
+          if (bus.state.currentPath === '/') {
+            bus.setStatus('根目录不能删除。', 'error');
+            return;
+          }
+          const confirmed = window.confirm(`确认删除目录 ${bus.state.currentPath}？这会递归删除目录下所有 DAV 文件映射。`);
+          if (!confirmed) return;
+          await bus.deleteCurrentFolder();
+          return;
+        }
+
+        if (action === 'toggle-folder' && path) {
+          await bus.toggleFolderExpanded(path);
+          return;
+        }
+
+        if (action === 'open-folder' && path) {
+          await bus.openFolder(path);
+        }
+      } catch (error) {
+        bus.setStatus(error instanceof Error ? error.message : '目录树操作失败。', 'error');
+      }
+    });
+  });
+</script>
+
+<style>
+  .admin-pane--right {
+    width: 300px;
+    transition: width 0.28s ease;
+  }
+
+  .admin-pane--right.is-collapsed {
+    width: 68px;
+  }
+
+  .admin-pane--right .admin-pane__content {
+    transition: opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .admin-pane--right.is-collapsed .admin-pane__content {
+    opacity: 0;
+    transform: translateX(12px);
+    pointer-events: none;
+  }
+
+  .admin-pane__hero--compact h2 {
+    margin: 12px 0 0;
+    font-size: 1.8rem;
+    line-height: 1;
+  }
+
+  .folder-tree-panel {
+    border-radius: 20px;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    background: #090909;
+    padding: 12px;
+  }
+
+  .folder-tree-panel__summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .folder-tree__root,
+  .folder-tree__children {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .folder-tree__children {
+    margin-left: 18px;
+    padding-left: 10px;
+    border-left: 1px dashed rgba(168, 255, 96, 0.12);
+  }
+
+  .folder-tree__item + .folder-tree__item {
+    margin-top: 8px;
+  }
+
+  .folder-tree__row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 4px;
+    border-radius: 14px;
+  }
+
+  .folder-tree__row.is-active {
+    background: rgba(57, 242, 174, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(57, 242, 174, 0.16);
+  }
+
+  .folder-tree__toggle,
+  .folder-tree__link {
+    min-height: 36px;
+    border-radius: 12px;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    background: #0e0e0e;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .folder-tree__link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    text-align: left;
+    overflow: hidden;
+  }
+
+  .folder-tree__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>
