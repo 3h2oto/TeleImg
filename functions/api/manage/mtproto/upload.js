@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { summarizeBridgeHealth } from '../../../_lib/bridge-health.js';
 import { json, methodNotAllowed, serviceUnavailable } from '../../../_lib/http.js';
 import { claimMtprotoUploadTargetByMessage, saveMtprotoUploadTarget } from '../../../_lib/mtproto-upload.js';
@@ -89,7 +87,7 @@ async function prepareUpload(context, config) {
     fileName,
     fileSize,
     contentType,
-    sessionId: chunked ? randomUUID() : '',
+    sessionId: chunked ? crypto.randomUUID() : '',
     totalParts,
     chunked
   });
