@@ -1,8 +1,10 @@
 <main class="admin-stage" data-admin-center>
   <div class="admin-stage__sticky">
     <div class="admin-stage__topline">
-      <div class="admin-breadcrumbs" data-role="breadcrumbs"></div>
-      <div class="admin-folder-context" data-role="folder-context"></div>
+      <div class="admin-stage__headline">
+        <div class="admin-breadcrumbs" data-role="breadcrumbs"></div>
+        <div class="admin-folder-context" data-role="folder-context"></div>
+      </div>
     </div>
 
     <form class="search-bar admin-search-bar" data-role="search-form">
@@ -111,44 +113,35 @@
       const telegram = item.metadata?.telegram;
       details.className = 'details-drawer';
       details.innerHTML = `
-        <div class="details-drawer__preview">
-          ${isVideo(item.name)
-            ? `<video controls preload="metadata" src="${item.url}"></video>`
-            : isAudio(item.name)
-              ? `<div class="audio-card details-drawer__audio"><span>🎵</span><a href="${item.url}" target="_blank" rel="noreferrer">播放 / 打开</a></div>`
-              : `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.name}" />`}
+        <div class="details-drawer__head">
+          <div class="details-drawer__title">
+            <strong>${item.metadata?.fileName || item.davName || item.name}</strong>
+            <p class="muted-text">${item.name}</p>
+          </div>
+          <div class="toolbar-row compact">
+            <button type="button" class="ghost-button" data-action="open-selected">打开</button>
+            <button type="button" class="ghost-button" data-action="clear-selection">取消选择</button>
+          </div>
         </div>
-        <div class="details-drawer__copy">
-          <div class="details-drawer__head">
-            <div>
-              <strong>${item.metadata?.fileName || item.davName || item.name}</strong>
-              <p class="muted-text">${item.name}</p>
-            </div>
-            <div class="toolbar-row compact">
-              <button type="button" class="ghost-button" data-action="open-selected">打开</button>
-              <button type="button" class="ghost-button" data-action="clear-selection">取消选择</button>
-            </div>
-          </div>
-          <div class="meta-chip-row">
-            <span class="meta-chip">${item.davPath || '/'}</span>
-            <span class="meta-chip">${formatBytes(item.metadata?.fileSize)}</span>
-            <span class="meta-chip">${formatTime(item.metadata?.TimeStamp)}</span>
-          </div>
-          <dl class="details-drawer__meta">
-            <div><dt>来源</dt><dd>${item.metadata?.source || 'unknown'}</dd></div>
-            <div><dt>聊天</dt><dd>${telegram?.chatTitle || telegram?.chatId || '未记录'}</dd></div>
-            <div><dt>消息</dt><dd>${telegram?.messageId || '未记录'}</dd></div>
-            <div><dt>远端删除</dt><dd>${item.canDeleteTelegram ? '支持' : '仅删 KV'}</dd></div>
-          </dl>
-          <div class="toolbar-row details-drawer__actions">
-            <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
-            <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
-            <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
-            <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
-            <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
-            <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
-            <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
-          </div>
+        <div class="meta-chip-row">
+          <span class="meta-chip">${item.davPath || '/'}</span>
+          <span class="meta-chip">${formatBytes(item.metadata?.fileSize)}</span>
+          <span class="meta-chip">${formatTime(item.metadata?.TimeStamp)}</span>
+          <span class="meta-chip">${telegram?.chatTitle || telegram?.chatId || '未记录聊天'}</span>
+        </div>
+        <div class="details-drawer__meta-row">
+          <div class="details-drawer__meta-card"><dt>来源</dt><dd>${item.metadata?.source || 'unknown'}</dd></div>
+          <div class="details-drawer__meta-card"><dt>消息</dt><dd>${telegram?.messageId || '未记录'}</dd></div>
+          <div class="details-drawer__meta-card"><dt>远端删除</dt><dd>${item.canDeleteTelegram ? '支持' : '仅删 KV'}</dd></div>
+        </div>
+        <div class="toolbar-row details-drawer__actions">
+          <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
+          <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
+          <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
+          <button type="button" class="ghost-button" data-action="white" data-key="${item.name}">白名单</button>
+          <button type="button" class="ghost-button" data-action="block" data-key="${item.name}">黑名单</button>
+          <button type="button" class="ghost-button danger" data-action="delete" data-key="${item.name}">真实删除</button>
+          <button type="button" class="ghost-button" data-action="delete-kv" data-key="${item.name}">仅删KV</button>
         </div>
       `;
     };
@@ -378,14 +371,23 @@
   }
 
   .admin-stage__topline {
-    display: grid;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .admin-stage__headline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
 
   .details-drawer {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 18px;
+    gap: 14px;
     padding: 16px;
     border-radius: 22px;
     border: 1px solid rgba(168, 255, 96, 0.1);
@@ -400,28 +402,6 @@
     padding: 8px 6px;
   }
 
-  .details-drawer__preview {
-    overflow: hidden;
-    border-radius: 18px;
-    background: #050505;
-    min-height: 180px;
-    display: grid;
-    place-items: center;
-  }
-
-  .details-drawer__preview img,
-  .details-drawer__preview video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .details-drawer__copy {
-    display: grid;
-    gap: 14px;
-    min-width: 0;
-  }
-
   .details-drawer__head {
     display: flex;
     flex-wrap: wrap;
@@ -429,36 +409,37 @@
     gap: 12px;
   }
 
+  .details-drawer__title strong,
   .details-drawer__head strong {
     font-size: 1.35rem;
   }
 
+  .details-drawer__title p,
   .details-drawer__head p {
     margin: 6px 0 0;
     word-break: break-all;
   }
 
-  .details-drawer__meta {
-    margin: 0;
+  .details-drawer__meta-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: 10px;
   }
 
-  .details-drawer__meta div {
+  .details-drawer__meta-card {
     border-radius: 14px;
     border: 1px solid rgba(168, 255, 96, 0.08);
     background: #101010;
     padding: 12px 14px;
   }
 
-  .details-drawer__meta dt {
+  .details-drawer__meta-card dt {
     margin-bottom: 6px;
     color: var(--muted);
     font-size: 0.88rem;
   }
 
-  .details-drawer__meta dd {
+  .details-drawer__meta-card dd {
     margin: 0;
     word-break: break-word;
   }
@@ -488,9 +469,7 @@
     box-shadow: 0 0 0 1px rgba(57, 242, 174, 0.18), 0 14px 42px rgba(0, 0, 0, 0.24);
   }
 
-  @media (max-width: 1100px) {
-    .details-drawer {
-      grid-template-columns: 1fr;
-    }
+  .explorer-grid[data-view='waterfall'] .explorer-card.is-selected {
+    box-shadow: 0 0 0 1px rgba(57, 242, 174, 0.16);
   }
 </style>
