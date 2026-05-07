@@ -1,4 +1,5 @@
 import { TELEGRAM_SYNC_STATE_KEY, getRecord, normalizeMetadata, readInternalJson, writeInternalJson } from './kv.js';
+import { claimMtprotoUploadTarget } from './mtproto-upload.js';
 import { buildTelegramRecordFromUpdate } from './telegram.js';
 
 function meaningfulFileName(name, key) {
@@ -62,12 +63,14 @@ export async function upsertTelegramRecord(env, update, options = {}) {
   const existing = await getRecord(env, record.key);
   const metadata = mergeMetadata(record.key, existing.metadata, record.metadata);
   await env.img_url.put(record.key, existing.value ?? '', { metadata });
+  const mtprotoTarget = await claimMtprotoUploadTarget(env, record.key, metadata);
 
   return {
     stored: true,
     created: !existing.metadata,
     key: record.key,
-    metadata
+    metadata,
+    mtprotoTarget
   };
 }
 

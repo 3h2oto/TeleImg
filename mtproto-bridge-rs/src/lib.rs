@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use grammers_client::message::InputMessage;
 use grammers_client::media::Media;
 use grammers_client::{Client, SignInError};
 use grammers_mtsender::SenderPool;
@@ -50,6 +51,13 @@ pub struct PreparedDownload {
     pub file: File,
     pub content_type: String,
     pub content_length: u64,
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadedMessage {
+    pub chat_id: i64,
+    pub message_id: i32,
     pub file_name: String,
 }
 
@@ -226,6 +234,40 @@ impl TelegramBridge {
             content_type,
             content_length,
             file_name,
+        })
+    }
+
+    pub async fn upload_stream_to_chat<S: tokio::io::AsyncRead + Unpin>(
+        &self,
+        chat_id: i64,
+        stream: &mut S,
+        size: usize,
+        file_name: &str,
+        content_type: Option<&str>,
+    ) -> Result<UploadedMessage> {
+        let peer = self.resolve_peer_ref(chat_id).await?;
+        let safe_file_name = sanitize_download_name(file_name, "upload.bin");
+        let uploaded = self
+            .client
+            .upload_stream(stream, size, safe_file_name.clone())
+            .await
+            .context("failed to upload media stream to telegram")?;
+
+        let mut input = InputMessage::new().text("").file(uploaded);
+        if let Some(mime) = content_type.map(str::trim).filter(|value| !value.is_empty()) {
+            input = input.mime_type(mime);
+        }
+
+        let message = self
+            .client
+            .send_message(peer, input)
+            .await
+            .context("failed to send uploaded media message")?;
+
+        Ok(UploadedMessage {
+            chat_id: message.peer_id().bot_api_dialog_id(),
+            message_id: message.id(),
+            file_name: safe_file_name,
         })
     }
 

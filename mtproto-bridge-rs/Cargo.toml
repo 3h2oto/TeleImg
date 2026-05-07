@@ -19,6 +19,7 @@ anyhow = "1.0.102"
 axum = "0.8.9"
 base64 = "0.22.1"
 clap = { version = "4.6.1", features = ["derive", "env"] }
+futures-util = "0.3.31"
 grammers-client = "0.9.0"
 grammers-mtsender = "0.9.0"
 grammers-session = "0.9.0"

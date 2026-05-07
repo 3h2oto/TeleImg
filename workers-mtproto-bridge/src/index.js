@@ -1,13 +1,15 @@
 import { connect } from 'cloudflare:sockets';
 import { Buffer } from 'node:buffer';
+import { createHash, randomBytes } from 'node:crypto';
 import bigInt from 'big-integer';
 
-import { TelegramClient, utils } from 'telegram';
+import { Api, TelegramClient, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 
 import { buildMtprotoBridgePayload, verifyMtprotoBridgePayload } from '../../shared/mtproto-bridge.js';
 
 const DEFAULT_REQUEST_SIZE = 256 * 1024;
+const BIG_FILE_THRESHOLD = 10 * 1024 * 1024;
 const CLOSE_ERROR = new Error('Cloudflare socket was closed');
 const ACCEPT_RANGES = 'bytes';
 
@@ -50,6 +52,18 @@ function sanitizeFileName(name, fallback) {
     .replace(/[\\/]+/g, '-')
     .slice(0, 240);
   return cleaned || fallback || 'telegram-file';
+}
+
+function decodeHeaderFileName(value, fallback = 'upload.bin') {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    return sanitizeFileName(decodeURIComponent(String(value)), fallback);
+  } catch {
+    return sanitizeFileName(String(value), fallback);
+  }
 }
 
 function toNumericChatCandidates(chatId) {
@@ -192,6 +206,105 @@ function createRangeStream(downloadIter, range) {
   });
 }
 
+function createUploadFileId() {
+  return bigInt(randomBytes(8).toString('hex') || '1', 16);
+}
+
+function parseContentLength(value) {
+  const size = Number.parseInt(String(value || ''), 10);
+  if (!Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+  return size;
+}
+
+function getUploadSizeFromHeaders(headers) {
+  return parseContentLength(headers.get('content-length') || headers.get('x-teleimg-file-size'));
+}
+
+async function uploadRequestStream(client, body, size, fileName) {
+  if (!body) {
+    throw new Error('Upload body is missing.');
+  }
+
+  const partSize = utils.getAppropriatedPartSize(bigInt(size)) * 1024;
+  const totalParts = Math.floor((size + partSize - 1) / partSize);
+  const isLarge = size > BIG_FILE_THRESHOLD;
+  const fileId = createUploadFileId();
+  const md5 = isLarge ? null : createHash('md5');
+  const reader = body.getReader();
+  let partIndex = 0;
+  let bytesRead = 0;
+  let pending = Buffer.alloc(0);
+
+  const sendPart = async (chunk) => {
+    if (md5) {
+      md5.update(chunk);
+    }
+
+    const request = isLarge
+      ? new Api.upload.SaveBigFilePart({
+          fileId,
+          filePart: partIndex,
+          fileTotalParts: totalParts,
+          bytes: chunk
+        })
+      : new Api.upload.SaveFilePart({
+          fileId,
+          filePart: partIndex,
+          bytes: chunk
+        });
+
+    const ok = await client.invoke(request);
+    if (!ok) {
+      throw new Error(`Telegram refused upload part ${partIndex}.`);
+    }
+    partIndex += 1;
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const chunk = value instanceof Uint8Array ? Buffer.from(value) : Buffer.from(new Uint8Array(value));
+    bytesRead += chunk.byteLength;
+    pending = pending.byteLength ? Buffer.concat([pending, chunk]) : chunk;
+
+    while (pending.byteLength >= partSize) {
+      const current = pending.subarray(0, partSize);
+      pending = pending.subarray(partSize);
+      await sendPart(current);
+    }
+  }
+
+  if (pending.byteLength > 0) {
+    await sendPart(pending);
+  }
+
+  if (bytesRead !== size) {
+    throw new Error(`Upload size mismatch: expected ${size} bytes, received ${bytesRead}.`);
+  }
+
+  if (partIndex !== totalParts) {
+    throw new Error(`Upload part mismatch: expected ${totalParts}, sent ${partIndex}.`);
+  }
+
+  return isLarge
+    ? new Api.InputFileBig({
+        id: fileId,
+        parts: totalParts,
+        name: fileName
+      })
+    : new Api.InputFile({
+        id: fileId,
+        parts: totalParts,
+        name: fileName,
+        md5Checksum: md5.digest('hex')
+      });
+}
+
 async function readQueryPayload(url) {
   const payload = buildMtprotoBridgePayload({
     key: url.searchParams.get('key') || '',
@@ -214,10 +327,25 @@ async function readQueryPayload(url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const stub = env.MT_BRIDGE.get(env.MT_BRIDGE.idFromName('default'));
 
     if (url.pathname === '/healthz') {
-      const stub = env.MT_BRIDGE.get(env.MT_BRIDGE.idFromName('default'));
       return stub.fetch('https://mtbridge.internal/internal/status');
+    }
+
+    if (url.pathname === '/telegram/upload') {
+      if (request.method !== 'POST') {
+        return text('Method Not Allowed', {
+          status: 405,
+          headers: { allow: 'POST', 'cache-control': 'no-store' }
+        });
+      }
+
+      if (!env.TG_MT_BRIDGE_SECRET || request.headers.get('x-teleimg-bridge-secret') !== env.TG_MT_BRIDGE_SECRET) {
+        return json({ error: 'Invalid bridge upload secret.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
+      }
+
+      return stub.fetch(request);
     }
 
     if (url.pathname !== '/telegram/file') {
@@ -251,7 +379,6 @@ export default {
       return json({ error: 'Invalid signed download signature.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
     }
 
-    const stub = env.MT_BRIDGE.get(env.MT_BRIDGE.idFromName('default'));
     return stub.fetch(request);
   }
 };
@@ -268,6 +395,7 @@ export class MtprotoBridgeDO {
       authorized: false,
       lastConnectedAt: null,
       lastDownloadAt: null,
+      lastUploadAt: null,
       lastError: null,
       cachedPeers: 0
     };
@@ -281,6 +409,7 @@ export class MtprotoBridgeDO {
       return json({
         ok: this.status.connected && this.status.authorized,
         route: '/telegram/file',
+        uploadRoute: '/telegram/upload',
         freePlanReady: true,
         ...this.status
       }, {
@@ -289,13 +418,19 @@ export class MtprotoBridgeDO {
       });
     }
 
-    if (url.pathname !== '/telegram/file') {
+    if (url.pathname !== '/telegram/file' && url.pathname !== '/telegram/upload') {
       return text('Not found.', { status: 404, headers: { 'cache-control': 'no-store' } });
     }
 
     try {
-      const response = await this.handleDownload(request, url);
-      this.status.lastDownloadAt = Date.now();
+      const response = url.pathname === '/telegram/upload'
+        ? await this.handleUpload(request)
+        : await this.handleDownload(request, url);
+      if (url.pathname === '/telegram/upload') {
+        this.status.lastUploadAt = Date.now();
+      } else {
+        this.status.lastDownloadAt = Date.now();
+      }
       this.status.lastError = null;
       return response;
     } catch (error) {
@@ -404,6 +539,48 @@ export class MtprotoBridgeDO {
     return new Response(stream, {
       status: 200,
       headers: fileSize != null ? { ...baseHeaders, 'content-length': String(fileSize) } : baseHeaders
+    });
+  }
+
+  async handleUpload(request) {
+    const chatId = String(request.headers.get('x-teleimg-chat-id') || '').trim();
+    const fileName = decodeHeaderFileName(request.headers.get('x-teleimg-file-name'), 'upload.bin');
+    const contentLength = getUploadSizeFromHeaders(request.headers);
+    const contentType = request.headers.get('content-type') || inferContentType(fileName);
+
+    if (!chatId) {
+      throw new Error('Missing x-teleimg-chat-id.');
+    }
+    if (!contentLength) {
+      throw new Error('Valid content-length is required for MTProto upload.');
+    }
+    if (!request.body) {
+      throw new Error('Upload body is missing.');
+    }
+
+    const client = await this.getClient();
+    const entity = await this.resolveEntity(client, chatId);
+    const uploaded = await uploadRequestStream(client, request.body, contentLength, fileName);
+    const message = await client.sendFile(entity, {
+      file: uploaded,
+      caption: '',
+      forceDocument: true,
+      supportsStreaming: contentType.startsWith('video/')
+    });
+
+    return json({
+      ok: true,
+      upload: {
+        chatId: message?.chatId?.toString?.() || chatId,
+        messageId: Number(message?.id || 0),
+        fileName,
+        contentType,
+        fileSize: contentLength,
+        mediaKind: 'document'
+      }
+    }, {
+      status: 201,
+      headers: { 'cache-control': 'no-store' }
     });
   }
 

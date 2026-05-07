@@ -224,3 +224,48 @@ export async function listRecords(env, { limit = 100, cursor, prefix, search } =
     scanned
   };
 }
+
+export async function findRecordByTelegramMessage(env, chatId, messageId, { maxScanned = 5000 } = {}) {
+  const normalizedChatId = chatId == null ? '' : String(chatId);
+  const normalizedMessageId = Number.parseInt(String(messageId), 10);
+  if (!normalizedChatId || !Number.isFinite(normalizedMessageId) || normalizedMessageId <= 0) {
+    return null;
+  }
+
+  let cursor;
+  let scanned = 0;
+  let done = false;
+
+  while (!done && scanned < maxScanned) {
+    const page = await env.img_url.list({ cursor, limit: 1000 });
+    cursor = page.cursor;
+    scanned += page.keys.length;
+
+    for (const entry of page.keys || []) {
+      if (isInternalKey(entry.name)) {
+        continue;
+      }
+
+      const metadata = normalizeMetadata(entry.name, entry.metadata);
+      if (metadata.telegram?.chatId !== normalizedChatId || metadata.telegram?.messageId !== normalizedMessageId) {
+        continue;
+      }
+
+      const fresh = await getRecord(env, entry.name);
+      if (!fresh.metadata) {
+        continue;
+      }
+
+      if (fresh.metadata.telegram?.chatId === normalizedChatId && fresh.metadata.telegram?.messageId === normalizedMessageId) {
+        return {
+          key: entry.name,
+          metadata: fresh.metadata
+        };
+      }
+    }
+
+    done = page.list_complete;
+  }
+
+  return null;
+}

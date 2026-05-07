@@ -5,10 +5,12 @@ import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[i
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
 import { onRequest as list } from '../functions/api/manage/list.js';
+import { onRequest as mtprotoUpload } from '../functions/api/manage/mtproto/upload.js';
 import { onRequest as bridgeWarmup } from '../functions/api/manage/telegram/bridge-warmup.js';
 import { onRequest as telegramStatus } from '../functions/api/manage/telegram/status.js';
 import { onRequest as toggleLike } from '../functions/api/manage/toggleLike/[id].js';
 import { getDavEntryKey } from '../functions/_lib/dav.js';
+import { buildMtprotoDesiredDavPath } from '../functions/_lib/mtproto-upload.js';
 import { processTelegramUpdates } from '../functions/_lib/telegram-sync.js';
 import { createKv } from './helpers.js';
 
@@ -185,6 +187,122 @@ describe('manage endpoints', () => {
     const stored = await env.img_url.getWithMetadata('telegramFileId1234567890123456789012345678901234567.pdf');
     expect(stored.metadata.source).toBe('telegram-app');
     expect(stored.metadata.telegram.messageId).toBe(7);
+  });
+
+  it('claims pending MTProto uploads into the requested DAV folder', async () => {
+    const env = { img_url: createKv() };
+    await processTelegramUpdates(env, [{
+      update_id: 77,
+      channel_post: {
+        message_id: 51,
+        date: 1710000100,
+        chat: { id: -1002389146660, type: 'channel', title: 'This_Img_Servant' },
+        document: {
+          file_id: 'telegramMtprotoFileId12345678901234567890123456789',
+          file_unique_id: 'unique-mtproto-1',
+          file_name: 'movie.mp4',
+          file_size: 4096,
+          mime_type: 'video/mp4'
+        }
+      }
+    }], { mode: 'webhook', source: 'telegram-app' });
+
+    const storedKey = 'telegramMtprotoFileId12345678901234567890123456789.mp4';
+    const existing = await env.img_url.getWithMetadata(storedKey);
+    expect(existing?.metadata?.telegram?.messageId).toBe(51);
+
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      upload: {
+        chatId: '-1002389146660',
+        messageId: 51,
+        fileName: 'movie.mp4',
+        fileSize: 4096,
+        contentType: 'video/mp4',
+        mediaKind: 'document'
+      }
+    }), {
+      status: 201,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    const response = await mtprotoUpload({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        TG_MT_BRIDGE_SECRET: 'secret',
+        TG_Chat_ID: '-1002389146660',
+        img_url: env.img_url
+      },
+      request: new Request('https://example.com/api/manage/mtproto/upload?path=/porn/%E7%99%BD%E7%9F%B3%E3%81%AA%E3%81%8A&name=movie.mp4', {
+        method: 'POST',
+        headers: {
+          'content-type': 'video/mp4',
+          'content-length': '4096'
+        },
+        body: new Uint8Array([1, 2, 3])
+      })
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.claimed).toBe(true);
+    expect(payload.davPath).toBe('/porn/白石なお/movie.mp4');
+
+    const browseResponse = await browseDav({
+      env,
+      request: new Request('https://example.com/api/manage/dav/browse?path=/porn/%E7%99%BD%E7%9F%B3%E3%81%AA%E3%81%8A')
+    });
+    const browsePayload = await browseResponse.json();
+    expect(browsePayload.counts.files).toBe(1);
+    expect(browsePayload.files[0].davPath).toBe('/porn/白石なお/movie.mp4');
+  });
+
+  it('stores a pending MTProto DAV target when webhook metadata has not arrived yet', async () => {
+    global.fetch = vi.fn(async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      expect(url).toBe('https://bridge.example.com/telegram/upload');
+      expect(init.method).toBe('POST');
+      expect(init.headers.get('x-teleimg-bridge-secret')).toBe('secret');
+      expect(init.headers.get('x-teleimg-chat-id')).toBe('-1002389146660');
+      return new Response(JSON.stringify({
+        ok: true,
+        upload: {
+          chatId: '-1002389146660',
+          messageId: 88,
+          fileName: 'clip.mp4',
+          fileSize: 12,
+          contentType: 'video/mp4',
+          mediaKind: 'document'
+        }
+      }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' }
+      });
+    });
+
+    const env = { img_url: createKv() };
+    const response = await mtprotoUpload({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        TG_MT_BRIDGE_SECRET: 'secret',
+        TG_Chat_ID: '-1002389146660',
+        img_url: env.img_url
+      },
+      request: new Request('https://example.com/api/manage/mtproto/upload?path=/albums&name=clip.mp4', {
+        method: 'POST',
+        headers: {
+          'content-type': 'video/mp4',
+          'content-length': '12'
+        },
+        body: new Uint8Array([1, 2, 3])
+      })
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.pending).toBe(true);
+    expect(payload.claimed).toBe(false);
+    expect(payload.target.davPath).toBe(buildMtprotoDesiredDavPath('/albums', 'clip.mp4'));
   });
 
 

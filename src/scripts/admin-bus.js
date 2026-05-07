@@ -483,6 +483,57 @@ export function ensureAdminBus() {
     setStatus(`已复制 ${key}。`, 'success');
   };
 
+  const uploadViaMtproto = async (fileList) => {
+    const files = Array.from(fileList || []).filter((file) => file instanceof File);
+    if (!files.length) {
+      return { uploaded: 0, files: [] };
+    }
+
+    const results = [];
+    for (const [index, file] of files.entries()) {
+      setStatus(`正在通过 MTProto 上传 ${index + 1}/${files.length}：${file.name} ...`, 'busy');
+      const response = await fetch(`/api/manage/mtproto/upload?path=${encodeURIComponent(state.currentPath)}&name=${encodeURIComponent(file.name)}`, {
+        method: 'POST',
+        headers: {
+          'content-type': file.type || 'application/octet-stream',
+          'x-teleimg-file-size': String(file.size || 0)
+        },
+        body: file
+      });
+
+      const payload = await response.json().catch(() => ({ error: '无法解析 MTProto 上传返回。' }));
+      if (!response.ok) {
+        throw new Error(payload?.error || 'MTProto 上传失败。');
+      }
+
+      results.push(payload);
+      state.folderCache.delete(state.currentPath);
+      const parentPath = getParentPath(state.currentPath);
+      if (parentPath) {
+        state.folderCache.delete(parentPath);
+      }
+      await openFolder(state.currentPath, { force: true, silent: true });
+
+      if (payload?.pending) {
+        setStatus(`已提交 ${file.name} 到 Telegram，等待 webhook 收录到 ${state.currentPath} ...`, 'busy');
+      } else {
+        setStatus(`MTProto 上传完成：${file.name}`, 'success');
+      }
+    }
+
+    const hasPending = results.some((item) => item?.pending);
+    if (hasPending) {
+      window.setTimeout(() => {
+        void refreshCurrentFolder().catch(() => {});
+      }, 2500);
+    }
+
+    return {
+      uploaded: results.length,
+      files: results
+    };
+  };
+
   const openSelectedItem = () => {
     const selected = getSelectedItem();
     if (!selected) return;
@@ -520,6 +571,7 @@ export function ensureAdminBus() {
     performItemAction,
     triggerTelegramAction,
     copyFileUrl,
+    uploadViaMtproto,
     selectItem,
     getFilteredItems,
     getSelectedItem,

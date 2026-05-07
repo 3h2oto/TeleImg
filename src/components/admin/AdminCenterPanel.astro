@@ -21,7 +21,13 @@
     </section>
   </div>
 
-  <p class="status-line" data-role="status">正在加载...</p>
+  <div class="status-line-row">
+    <p class="status-line" data-role="status">正在加载...</p>
+    <div class="status-line-actions">
+      <input type="file" data-role="mtproto-upload-input" multiple hidden />
+      <button type="button" class="ghost-button" data-action="mtproto-upload">MTProto 上传</button>
+    </div>
+  </div>
   <div class="summary-row admin-folder-summary" data-role="summary"></div>
 
   <div class="admin-grid explorer-grid" data-role="grid"></div>
@@ -44,6 +50,7 @@
 
     const bus = ensureAdminBus();
     const status = root.querySelector('[data-role="status"]');
+    const uploadInput = root.querySelector('[data-role="mtproto-upload-input"]');
     const summary = root.querySelector('[data-role="summary"]');
     const details = root.querySelector('[data-role="details"]');
     const grid = root.querySelector('[data-role="grid"]');
@@ -210,7 +217,7 @@
 
     const handleAction = async (action, key) => {
       const item = key ? bus.state.currentItems.find((entry) => entry.name === key) : bus.getSelectedItem();
-      if (!item && !['clear-selection', 'open-selected', 'reset-search'].includes(action)) return;
+      if (!item && !['clear-selection', 'open-selected', 'reset-search', 'mtproto-upload'].includes(action)) return;
 
       if (action === 'open-selected') {
         bus.openSelectedItem();
@@ -224,6 +231,11 @@
 
       if (action === 'reset-search') {
         bus.setSearch('');
+        return;
+      }
+
+      if (action === 'mtproto-upload') {
+        uploadInput?.click();
         return;
       }
 
@@ -284,6 +296,17 @@
       const card = target?.closest('[data-key]');
       if (card) {
         bus.selectItem(card.dataset.key);
+      }
+    });
+
+    uploadInput?.addEventListener('change', async () => {
+      if (!uploadInput.files?.length) return;
+      try {
+        await bus.uploadViaMtproto(uploadInput.files);
+      } catch (error) {
+        bus.setStatus(error instanceof Error ? error.message : 'MTProto 上传失败。', 'error');
+      } finally {
+        uploadInput.value = '';
       }
     });
 
@@ -361,6 +384,25 @@
     gap: 8px;
     padding-bottom: 8px;
     background: linear-gradient(180deg, rgba(9, 9, 9, 0.98), rgba(9, 9, 9, 0.92) 72%, rgba(9, 9, 9, 0));
+  }
+
+  .status-line-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .status-line-row .status-line {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .status-line-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex: 0 0 auto;
   }
 
   .admin-stage__topline {
