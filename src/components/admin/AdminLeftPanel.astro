@@ -1,3 +1,16 @@
+---
+import { execSync } from 'node:child_process';
+
+let commitHash = process.env.CF_PAGES_COMMIT_SHA?.slice(0, 7);
+if (!commitHash) {
+  try {
+    commitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    commitHash = 'local';
+  }
+}
+---
+
 <aside class="admin-pane admin-pane--left" data-admin-left>
   <div class="admin-pane__rail">
     <button type="button" class="admin-pane__toggle" data-action="toggle-panel" aria-expanded="true" aria-label="折叠左侧功能栏">
@@ -8,7 +21,8 @@
   <div class="admin-pane__content">
     <div class="admin-pane__hero">
       <span class="eyebrow">Dashboard</span>
-      <h1>TeleImg Admin</h1>
+      <h1>{commitHash}</h1>
+      <p class="admin-pane__hash-label">build commit</p>
     </div>
 
     <section class="admin-pane__group">
@@ -171,6 +185,16 @@
     margin: 12px 0 0;
     font-size: clamp(2.2rem, 2.8vw, 3.3rem);
     line-height: 0.98;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .admin-pane__hash-label {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .admin-pane--left .admin-pane__buttons {
