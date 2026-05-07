@@ -20,6 +20,7 @@ import { getRuntimeConfig } from '../_lib/runtime-config.js';
 import { uploadFileToTelegram } from '../_lib/telegram-upload.js';
 
 const DAV_ALLOW = 'OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY';
+const LEGACY_DAV_PUT_LIMIT_BYTES = 32 * 1024 * 1024;
 
 function xmlEscape(value) {
   return String(value ?? '')
@@ -37,6 +38,19 @@ function davHeaders(extra = {}) {
     'MS-Author-Via': 'DAV',
     ...extra
   };
+}
+
+function createLegacyDavUploadTooLargeResponse() {
+  return text(
+    `Legacy WebDAV PUT is limited to ${Math.floor(LEGACY_DAV_PUT_LIMIT_BYTES / 1024 / 1024)} MiB in TeleImg. Use /admin 的 MTProto 上传 for larger files.`,
+    {
+      status: 413,
+      headers: davHeaders({
+        'Cache-Control': 'no-store',
+        'X-TeleImg-Upload-Route': '/admin'
+      })
+    }
+  );
 }
 
 function toHttpDate(value) {
@@ -283,8 +297,16 @@ export async function onRequest(context) {
       return text('Cannot overwrite a collection with a file.', { status: 409, headers: davHeaders() });
     }
 
+    const declaredSize = Number.parseInt(context.request.headers.get('content-length') || '', 10);
+    if (Number.isFinite(declaredSize) && declaredSize > LEGACY_DAV_PUT_LIMIT_BYTES) {
+      return createLegacyDavUploadTooLargeResponse();
+    }
+
     await ensureDavCollections(context.env, davPath);
     const body = await context.request.arrayBuffer();
+    if (body.byteLength > LEGACY_DAV_PUT_LIMIT_BYTES) {
+      return createLegacyDavUploadTooLargeResponse();
+    }
     const contentType = context.request.headers.get('content-type') || 'application/octet-stream';
     const fileName = getDavBaseName(davPath) || 'upload.bin';
     const file = new File([body], fileName, { type: contentType });

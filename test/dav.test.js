@@ -202,6 +202,32 @@ describe('WebDAV route', () => {
     expect(missingResponse.status).toBe(404);
   });
 
+  it('rejects oversized legacy WebDAV PUT with an explicit MTProto hint', async () => {
+    const env = {
+      TG_Bot_Token: 'token',
+      TG_Chat_ID: '-10001',
+      img_url: createKv()
+    };
+
+    const response = await onRequest({
+      env,
+      request: new Request('https://example.com/dav/docs/too-big.bin', {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-length': String(33 * 1024 * 1024)
+        },
+        body: 'x'
+      })
+    });
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get('x-teleimg-upload-route')).toBe('/admin');
+    const body = await response.text();
+    expect(body).toContain('Legacy WebDAV PUT is limited');
+    expect(body).toContain('MTProto');
+  });
+
   it('keeps projected root moves in sync with admin metadata and hides the old path', async () => {
     const env = {
       TG_Bot_Token: 'token',

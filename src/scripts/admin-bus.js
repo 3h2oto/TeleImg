@@ -602,14 +602,27 @@ export function ensureAdminBus() {
     return prepared;
   };
 
+  const refreshPreparedUpload = async (taskId, task, options = {}) => {
+    replaceUploadTask(taskId, {
+      phase: 'refreshing-signature',
+      status: 'uploading',
+      canRetry: false
+    });
+    const prepared = await prepareMtprotoUpload(task, options);
+    replaceUploadTask(taskId, {
+      sessionId: prepared.sessionId || task.sessionId || '',
+      expiresAt: prepared.expiresAt || null,
+      phase: 'uploading',
+      status: 'uploading'
+    });
+    return prepared;
+  };
+
   const uploadViaMtprotoDirect = async (prepared, task) => {
     let activePrepared = prepared;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (attempt > 0 || shouldRefreshUploadSignature(activePrepared)) {
-        activePrepared = await prepareMtprotoUpload(task, { reuseSession: false });
-        replaceUploadTask(task.id, {
-          expiresAt: activePrepared.expiresAt || null
-        });
+        activePrepared = await refreshPreparedUpload(task.id, task, { reuseSession: false });
       }
 
       const response = await fetch(activePrepared.uploadUrl, {
@@ -661,14 +674,10 @@ export function ensureAdminBus() {
 
     for (let part = startPart; part < totalParts; part += 1) {
       if (shouldRefreshUploadSignature(activePrepared)) {
-        activePrepared = await prepareMtprotoUpload({
+        activePrepared = await refreshPreparedUpload(task.id, {
           ...task,
           sessionId: activePrepared.sessionId || task.sessionId || ''
         }, { reuseSession: true });
-        replaceUploadTask(task.id, {
-          sessionId: activePrepared.sessionId || task.sessionId || '',
-          expiresAt: activePrepared.expiresAt || null
-        });
       }
 
       const start = part * chunkSize;
@@ -699,14 +708,10 @@ export function ensureAdminBus() {
 
         const errorMessage = payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`;
         if (attempt === 0 && isExpiredUploadErrorMessage(errorMessage)) {
-          activePrepared = await prepareMtprotoUpload({
+          activePrepared = await refreshPreparedUpload(task.id, {
             ...task,
             sessionId: activePrepared.sessionId || task.sessionId || ''
           }, { reuseSession: true });
-          replaceUploadTask(task.id, {
-            sessionId: activePrepared.sessionId || task.sessionId || '',
-            expiresAt: activePrepared.expiresAt || null
-          });
           chunkUrl = new URL(activePrepared.uploadUrl);
           chunkUrl.searchParams.set('part', String(part));
           chunkUrl.searchParams.set('totalParts', String(totalParts));
