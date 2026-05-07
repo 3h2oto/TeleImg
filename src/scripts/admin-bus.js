@@ -483,6 +483,77 @@ export function ensureAdminBus() {
     setStatus(`已复制 ${key}。`, 'success');
   };
 
+  const parseResponsePayload = async (response, fallbackMessage) => {
+    const raw = await response.text();
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {
+        error: raw?.trim() || fallbackMessage
+      };
+    }
+  };
+
+  const uploadViaMtprotoDirect = async (prepared, file) => {
+    const response = await fetch(prepared.uploadUrl, {
+      method: 'POST',
+      mode: 'cors',
+      headers: file.type ? { 'content-type': file.type } : undefined,
+      body: file
+    });
+
+    const payload = await parseResponsePayload(response, '无法解析 MTProto bridge 上传返回。');
+    if (!response.ok) {
+      throw new Error(payload?.error || 'MTProto bridge 直传失败。');
+    }
+
+    return payload;
+  };
+
+  const uploadViaMtprotoChunked = async (prepared, file) => {
+    const chunkSize = Number(prepared.chunkSize || 0);
+    if (!Number.isFinite(chunkSize) || chunkSize <= 0) {
+      throw new Error('分块上传参数无效。');
+    }
+
+    const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(file.size / chunkSize)));
+    let finalPayload = null;
+
+    for (let part = 0; part < totalParts; part += 1) {
+      const start = part * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const chunk = file.slice(start, end);
+      const chunkUrl = new URL(prepared.uploadUrl);
+      chunkUrl.searchParams.set('part', String(part));
+      chunkUrl.searchParams.set('totalParts', String(totalParts));
+      if (part === totalParts - 1) {
+        chunkUrl.searchParams.set('final', '1');
+      }
+
+      setStatus(`正在分块上传 ${file.name}：${part + 1}/${totalParts} ...`, 'busy');
+      const response = await fetch(chunkUrl.toString(), {
+        method: 'POST',
+        mode: 'cors',
+        headers: file.type ? { 'content-type': file.type } : undefined,
+        body: chunk
+      });
+      const payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
+      if (!response.ok) {
+        throw new Error(payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
+      }
+
+      if (payload?.upload) {
+        finalPayload = payload;
+      }
+    }
+
+    if (!finalPayload?.upload) {
+      throw new Error('MTProto 分块上传没有返回最终消息信息。');
+    }
+
+    return finalPayload;
+  };
+
   const uploadViaMtproto = async (fileList) => {
     const files = Array.from(fileList || []).filter((file) => file instanceof File);
     if (!files.length) {
@@ -492,18 +563,35 @@ export function ensureAdminBus() {
     const results = [];
     for (const [index, file] of files.entries()) {
       setStatus(`正在通过 MTProto 上传 ${index + 1}/${files.length}：${file.name} ...`, 'busy');
-      const response = await fetch(`/api/manage/mtproto/upload?path=${encodeURIComponent(state.currentPath)}&name=${encodeURIComponent(file.name)}`, {
+      const prepareResponse = await fetch(`/api/manage/mtproto/upload?path=${encodeURIComponent(state.currentPath)}&name=${encodeURIComponent(file.name)}&size=${encodeURIComponent(file.size)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}`, {
+        headers: {
+          accept: 'application/json'
+        }
+      });
+      const prepared = await parseResponsePayload(prepareResponse, '无法解析 MTProto 上传预签名返回。');
+      if (!prepareResponse.ok) {
+        throw new Error(prepared?.error || 'MTProto 上传准备失败。');
+      }
+
+      const bridgePayload = prepared.mode === 'chunked'
+        ? await uploadViaMtprotoChunked(prepared, file)
+        : await uploadViaMtprotoDirect(prepared, file);
+
+      const finalizeResponse = await fetch('/api/manage/mtproto/upload', {
         method: 'POST',
         headers: {
-          'content-type': file.type || 'application/octet-stream',
-          'x-teleimg-file-size': String(file.size || 0)
+          'content-type': 'application/json'
         },
-        body: file
+        body: JSON.stringify({
+          path: state.currentPath,
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream',
+          upload: bridgePayload.upload
+        })
       });
-
-      const payload = await response.json().catch(() => ({ error: '无法解析 MTProto 上传返回。' }));
-      if (!response.ok) {
-        throw new Error(payload?.error || 'MTProto 上传失败。');
+      const payload = await parseResponsePayload(finalizeResponse, '无法解析 MTProto 上传 finalize 返回。');
+      if (!finalizeResponse.ok) {
+        throw new Error(payload?.error || 'MTProto 上传收尾失败。');
       }
 
       results.push(payload);

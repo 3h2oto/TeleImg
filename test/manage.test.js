@@ -5,7 +5,7 @@ import { onRequest as deleteKvRecord } from '../functions/api/manage/deleteKv/[i
 import { onRequest as deleteRecord } from '../functions/api/manage/delete/[id].js';
 import { onRequest as editName } from '../functions/api/manage/editName/[id].js';
 import { onRequest as list } from '../functions/api/manage/list.js';
-import { onRequest as mtprotoUpload } from '../functions/api/manage/mtproto/upload.js';
+import { __test as mtprotoUploadTest, onRequest as mtprotoUpload } from '../functions/api/manage/mtproto/upload.js';
 import { onRequest as bridgeWarmup } from '../functions/api/manage/telegram/bridge-warmup.js';
 import { onRequest as telegramStatus } from '../functions/api/manage/telegram/status.js';
 import { onRequest as toggleLike } from '../functions/api/manage/toggleLike/[id].js';
@@ -211,35 +211,31 @@ describe('manage endpoints', () => {
     const existing = await env.img_url.getWithMetadata(storedKey);
     expect(existing?.metadata?.telegram?.messageId).toBe(51);
 
-    global.fetch = vi.fn(async () => new Response(JSON.stringify({
-      ok: true,
-      upload: {
-        chatId: '-1002389146660',
-        messageId: 51,
-        fileName: 'movie.mp4',
-        fileSize: 4096,
-        contentType: 'video/mp4',
-        mediaKind: 'document'
-      }
-    }), {
-      status: 201,
-      headers: { 'content-type': 'application/json' }
-    }));
-
     const response = await mtprotoUpload({
       env: {
         TG_MT_BRIDGE_URL: 'https://bridge.example.com',
         TG_MT_BRIDGE_SECRET: 'secret',
         TG_Chat_ID: '-1002389146660',
         img_url: env.img_url
-      },
-      request: new Request('https://example.com/api/manage/mtproto/upload?path=/porn/%E7%99%BD%E7%9F%B3%E3%81%AA%E3%81%8A&name=movie.mp4', {
+      },      
+      request: new Request('https://example.com/api/manage/mtproto/upload', {
         method: 'POST',
         headers: {
-          'content-type': 'video/mp4',
-          'content-length': '4096'
+          'content-type': 'application/json'
         },
-        body: new Uint8Array([1, 2, 3])
+        body: JSON.stringify({
+          path: '/porn/白石なお',
+          fileName: 'movie.mp4',
+          contentType: 'video/mp4',
+          upload: {
+            chatId: '-1002389146660',
+            messageId: 51,
+            fileName: 'movie.mp4',
+            fileSize: 4096,
+            contentType: 'video/mp4',
+            mediaKind: 'document'
+          }
+        })
       })
     });
 
@@ -257,25 +253,15 @@ describe('manage endpoints', () => {
     expect(browsePayload.files[0].davPath).toBe('/porn/白石なお/movie.mp4');
   });
 
-  it('stores a pending MTProto DAV target when webhook metadata has not arrived yet', async () => {
-    global.fetch = vi.fn(async (input, init) => {
+  it('prepares a direct signed MTProto upload URL for external bridges', async () => {
+    global.fetch = vi.fn(async (input) => {
       const url = typeof input === 'string' ? input : input.url;
-      expect(url).toBe('https://bridge.example.com/telegram/upload');
-      expect(init.method).toBe('POST');
-      expect(init.headers.get('x-teleimg-bridge-secret')).toBe('secret');
-      expect(init.headers.get('x-teleimg-chat-id')).toBe('-1002389146660');
+      expect(url).toBe('https://bridge.example.com/healthz');
       return new Response(JSON.stringify({
         ok: true,
-        upload: {
-          chatId: '-1002389146660',
-          messageId: 88,
-          fileName: 'clip.mp4',
-          fileSize: 12,
-          contentType: 'video/mp4',
-          mediaKind: 'document'
-        }
+        authorized: true
       }), {
-        status: 201,
+        status: 200,
         headers: { 'content-type': 'application/json' }
       });
     });
@@ -288,13 +274,72 @@ describe('manage endpoints', () => {
         TG_Chat_ID: '-1002389146660',
         img_url: env.img_url
       },
-      request: new Request('https://example.com/api/manage/mtproto/upload?path=/albums&name=clip.mp4', {
+      request: new Request('https://example.com/api/manage/mtproto/upload?path=/albums&name=clip.mp4&size=12&type=video/mp4')
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.mode).toBe('direct');
+    expect(payload.uploadUrl).toContain('https://bridge.example.com/telegram/upload?');
+    expect(payload.chunkSize).toBeNull();
+  });
+
+  it('prepares a chunked upload for large files when the bridge backend is workers-free', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      freePlanReady: true,
+      authorized: true
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    const env = { img_url: createKv() };
+    const response = await mtprotoUpload({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        TG_MT_BRIDGE_SECRET: 'secret',
+        TG_Chat_ID: '-1002389146660',
+        img_url: env.img_url
+      },
+      request: new Request(`https://example.com/api/manage/mtproto/upload?path=/albums&name=big.mp4&size=${mtprotoUploadTest.WORKERS_DIRECT_UPLOAD_LIMIT + 1}&type=video/mp4`)
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.mode).toBe('chunked');
+    expect(payload.chunkSize).toBe(mtprotoUploadTest.WORKERS_CHUNK_SIZE);
+    expect(payload.totalParts).toBeGreaterThan(1);
+    expect(payload.uploadUrl).toContain('/telegram/upload/chunk?');
+  });
+
+  it('stores a pending MTProto DAV target when finalize runs before webhook metadata arrives', async () => {
+    const env = { img_url: createKv() };
+    const response = await mtprotoUpload({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://bridge.example.com',
+        TG_MT_BRIDGE_SECRET: 'secret',
+        TG_Chat_ID: '-1002389146660',
+        img_url: env.img_url
+      },
+      request: new Request('https://example.com/api/manage/mtproto/upload', {
         method: 'POST',
         headers: {
-          'content-type': 'video/mp4',
-          'content-length': '12'
+          'content-type': 'application/json'
         },
-        body: new Uint8Array([1, 2, 3])
+        body: JSON.stringify({
+          path: '/albums',
+          fileName: 'clip.mp4',
+          contentType: 'video/mp4',
+          upload: {
+            chatId: '-1002389146660',
+            messageId: 88,
+            fileName: 'clip.mp4',
+            fileSize: 12,
+            contentType: 'video/mp4',
+            mediaKind: 'document'
+          }
+        })
       })
     });
 

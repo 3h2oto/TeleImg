@@ -6,10 +6,16 @@ import bigInt from 'big-integer';
 import { Api, TelegramClient, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 
-import { buildMtprotoBridgePayload, verifyMtprotoBridgePayload } from '../../shared/mtproto-bridge.js';
+import {
+  buildMtprotoBridgePayload,
+  buildMtprotoBridgeUploadPayload,
+  verifyMtprotoBridgePayload,
+  verifyMtprotoBridgeUploadPayload
+} from '../../shared/mtproto-bridge.js';
 
 const DEFAULT_REQUEST_SIZE = 256 * 1024;
 const BIG_FILE_THRESHOLD = 10 * 1024 * 1024;
+const UPLOAD_SESSION_TTL_MS = 30 * 60 * 1000;
 const CLOSE_ERROR = new Error('Cloudflare socket was closed');
 const ACCEPT_RANGES = 'bytes';
 
@@ -218,6 +224,51 @@ function parseContentLength(value) {
   return size;
 }
 
+function uploadCorsHeaders(extra = {}) {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': 'Content-Type',
+    'access-control-max-age': '86400',
+    ...extra
+  };
+}
+
+function uploadJson(data, init = {}) {
+  return json(data, {
+    ...init,
+    headers: uploadCorsHeaders(init.headers)
+  });
+}
+
+function uploadText(body, init = {}) {
+  return text(body, {
+    ...init,
+    headers: uploadCorsHeaders(init.headers)
+  });
+}
+
+async function readUploadQueryPayload(url) {
+  const rawSize = url.searchParams.get('size') || '';
+  const payload = buildMtprotoBridgeUploadPayload({
+    chatId: url.searchParams.get('chatId') || '',
+    fileName: url.searchParams.get('name') || '',
+    fileSize: rawSize,
+    contentType: url.searchParams.get('type') || '',
+    sessionId: url.searchParams.get('session') || '',
+    totalParts: url.searchParams.get('parts') || '',
+    expiresAt: Number.parseInt(url.searchParams.get('expires') || '0', 10) * 1000
+  });
+
+  if (!payload) {
+    return null;
+  }
+
+  payload.expires = url.searchParams.get('expires') || '';
+  payload.parts = url.searchParams.get('parts') || payload.parts || '';
+  return payload;
+}
+
 function getUploadSizeFromHeaders(headers) {
   return parseContentLength(headers.get('content-length') || headers.get('x-teleimg-file-size'));
 }
@@ -333,16 +384,44 @@ export default {
       return stub.fetch('https://mtbridge.internal/internal/status');
     }
 
-    if (url.pathname === '/telegram/upload') {
-      if (request.method !== 'POST') {
-        return text('Method Not Allowed', {
-          status: 405,
-          headers: { allow: 'POST', 'cache-control': 'no-store' }
+    if (url.pathname === '/telegram/upload' || url.pathname === '/telegram/upload/chunk') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: uploadCorsHeaders()
         });
       }
 
-      if (!env.TG_MT_BRIDGE_SECRET || request.headers.get('x-teleimg-bridge-secret') !== env.TG_MT_BRIDGE_SECRET) {
-        return json({ error: 'Invalid bridge upload secret.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
+      if (request.method !== 'POST') {
+        return uploadText('Method Not Allowed', {
+          status: 405,
+          headers: { allow: 'POST, OPTIONS', 'cache-control': 'no-store' }
+        });
+      }
+
+      const usingLegacyHeaderAuth = url.pathname === '/telegram/upload'
+        && request.headers.get('x-teleimg-bridge-secret') === env.TG_MT_BRIDGE_SECRET;
+
+      if (!usingLegacyHeaderAuth) {
+        const payload = await readUploadQueryPayload(url);
+        const signature = url.searchParams.get('sig') || '';
+        if (!payload || !signature) {
+          return uploadJson({ error: 'Missing signed upload parameters.' }, { status: 400, headers: { 'cache-control': 'no-store' } });
+        }
+
+        const expires = Number.parseInt(payload.expires, 10);
+        if (!Number.isFinite(expires) || expires <= 0) {
+          return uploadJson({ error: 'Invalid expires timestamp.' }, { status: 400, headers: { 'cache-control': 'no-store' } });
+        }
+
+        if (Date.now() > expires * 1000) {
+          return uploadJson({ error: 'Signed upload URL has expired.' }, { status: 410, headers: { 'cache-control': 'no-store' } });
+        }
+
+        const verified = await verifyMtprotoBridgeUploadPayload(env.TG_MT_BRIDGE_SECRET, payload, signature);
+        if (!verified) {
+          return uploadJson({ error: 'Invalid signed upload signature.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
+        }
       }
 
       return stub.fetch(request);
@@ -390,6 +469,7 @@ export class MtprotoBridgeDO {
     this.client = null;
     this.clientPromise = null;
     this.peerCache = new Map();
+    this.uploadSessions = new Map();
     this.status = {
       connected: false,
       authorized: false,
@@ -410,6 +490,7 @@ export class MtprotoBridgeDO {
         ok: this.status.connected && this.status.authorized,
         route: '/telegram/file',
         uploadRoute: '/telegram/upload',
+        chunkUploadRoute: '/telegram/upload/chunk',
         freePlanReady: true,
         ...this.status
       }, {
@@ -418,15 +499,17 @@ export class MtprotoBridgeDO {
       });
     }
 
-    if (url.pathname !== '/telegram/file' && url.pathname !== '/telegram/upload') {
+    if (url.pathname !== '/telegram/file' && url.pathname !== '/telegram/upload' && url.pathname !== '/telegram/upload/chunk') {
       return text('Not found.', { status: 404, headers: { 'cache-control': 'no-store' } });
     }
 
     try {
-      const response = url.pathname === '/telegram/upload'
-        ? await this.handleUpload(request)
+      const response = url.pathname === '/telegram/upload/chunk'
+        ? await this.handleChunkUpload(request, url)
+        : url.pathname === '/telegram/upload'
+          ? await this.handleUpload(request, url)
         : await this.handleDownload(request, url);
-      if (url.pathname === '/telegram/upload') {
+      if (url.pathname === '/telegram/upload' || url.pathname === '/telegram/upload/chunk') {
         this.status.lastUploadAt = Date.now();
       } else {
         this.status.lastDownloadAt = Date.now();
@@ -436,7 +519,9 @@ export class MtprotoBridgeDO {
     } catch (error) {
       this.status.lastError = error instanceof Error ? error.message : 'Unknown bridge error';
       this.status.connected = false;
-      return json({ error: this.status.lastError }, { status: 502, headers: { 'cache-control': 'no-store' } });
+      return url.pathname.startsWith('/telegram/upload')
+        ? uploadJson({ error: this.status.lastError }, { status: 502, headers: { 'cache-control': 'no-store' } })
+        : json({ error: this.status.lastError }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
 
@@ -542,17 +627,19 @@ export class MtprotoBridgeDO {
     });
   }
 
-  async handleUpload(request) {
-    const chatId = String(request.headers.get('x-teleimg-chat-id') || '').trim();
-    const fileName = decodeHeaderFileName(request.headers.get('x-teleimg-file-name'), 'upload.bin');
-    const contentLength = getUploadSizeFromHeaders(request.headers);
-    const contentType = request.headers.get('content-type') || inferContentType(fileName);
+  async handleUpload(request, url) {
+    const legacy = request.headers.get('x-teleimg-bridge-secret') === this.env.TG_MT_BRIDGE_SECRET;
+    const signedPayload = legacy ? null : await readUploadQueryPayload(url);
+    const chatId = signedPayload?.chatId || String(request.headers.get('x-teleimg-chat-id') || '').trim();
+    const fileName = signedPayload?.name || decodeHeaderFileName(request.headers.get('x-teleimg-file-name'), 'upload.bin');
+    const contentLength = parseContentLength(signedPayload?.size) || getUploadSizeFromHeaders(request.headers);
+    const contentType = signedPayload?.type || request.headers.get('content-type') || inferContentType(fileName);
 
     if (!chatId) {
-      throw new Error('Missing x-teleimg-chat-id.');
+      throw new Error('Missing chatId.');
     }
     if (!contentLength) {
-      throw new Error('Valid content-length is required for MTProto upload.');
+      throw new Error('Valid upload size is required.');
     }
     if (!request.body) {
       throw new Error('Upload body is missing.');
@@ -568,7 +655,7 @@ export class MtprotoBridgeDO {
       supportsStreaming: contentType.startsWith('video/')
     });
 
-    return json({
+    return uploadJson({
       ok: true,
       upload: {
         chatId: message?.chatId?.toString?.() || chatId,
@@ -582,6 +669,128 @@ export class MtprotoBridgeDO {
       status: 201,
       headers: { 'cache-control': 'no-store' }
     });
+  }
+
+  async handleChunkUpload(request, url) {
+    const payload = await readUploadQueryPayload(url);
+    const chatId = payload?.chatId || '';
+    const sessionId = payload?.session || '';
+    const fileName = payload?.name || 'upload.bin';
+    const contentType = payload?.type || inferContentType(fileName);
+    const fileSize = parseContentLength(payload?.size);
+    const totalParts = parseContentLength(payload?.parts);
+    const part = Number.parseInt(url.searchParams.get('part') || '', 10);
+    const isFinal = url.searchParams.get('final') === '1';
+
+    if (!chatId || !sessionId || !fileSize || !totalParts || !Number.isFinite(part) || part < 0) {
+      throw new Error('Invalid chunk upload parameters.');
+    }
+    if (!request.body) {
+      throw new Error('Chunk upload body is missing.');
+    }
+
+    const chunkBuffer = Buffer.from(await request.arrayBuffer());
+    const client = await this.getClient();
+    const entity = await this.resolveEntity(client, chatId);
+    const session = this.ensureUploadSession(sessionId, {
+      chatId,
+      fileName,
+      contentType,
+      fileSize,
+      totalParts,
+      entity
+    });
+
+    if (session.receivedParts !== part) {
+      throw new Error(`Unexpected upload part ${part}; expected ${session.receivedParts}.`);
+    }
+
+    const ok = await client.invoke(new Api.upload.SaveBigFilePart({
+      fileId: session.fileId,
+      filePart: part,
+      fileTotalParts: session.totalParts,
+      bytes: chunkBuffer
+    }));
+    if (!ok) {
+      throw new Error(`Telegram refused chunk ${part}.`);
+    }
+
+    session.receivedParts += 1;
+    session.bytesReceived += chunkBuffer.byteLength;
+    session.lastTouchedAt = Date.now();
+
+    const complete = isFinal || session.receivedParts >= session.totalParts || session.bytesReceived >= session.fileSize;
+    if (!complete) {
+      return uploadJson({
+        ok: true,
+        complete: false,
+        receivedParts: session.receivedParts,
+        totalParts: session.totalParts,
+        uploadedBytes: session.bytesReceived,
+        fileSize: session.fileSize
+      }, {
+        status: 200,
+        headers: { 'cache-control': 'no-store' }
+      });
+    }
+
+    if (session.bytesReceived !== session.fileSize) {
+      throw new Error(`Chunked upload size mismatch: expected ${session.fileSize}, received ${session.bytesReceived}.`);
+    }
+
+    const uploaded = new Api.InputFileBig({
+      id: session.fileId,
+      parts: session.totalParts,
+      name: session.fileName
+    });
+
+    const message = await client.sendFile(session.entity, {
+      file: uploaded,
+      caption: '',
+      forceDocument: true,
+      supportsStreaming: session.contentType.startsWith('video/')
+    });
+
+    this.uploadSessions.delete(sessionId);
+    return uploadJson({
+      ok: true,
+      complete: true,
+      upload: {
+        chatId: message?.chatId?.toString?.() || chatId,
+        messageId: Number(message?.id || 0),
+        fileName: session.fileName,
+        contentType: session.contentType,
+        fileSize: session.fileSize,
+        mediaKind: 'document'
+      }
+    }, {
+      status: 201,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
+
+  ensureUploadSession(sessionId, values) {
+    const now = Date.now();
+    for (const [key, session] of this.uploadSessions) {
+      if (Number(session?.lastTouchedAt || 0) + UPLOAD_SESSION_TTL_MS < now) {
+        this.uploadSessions.delete(key);
+      }
+    }
+
+    const existing = this.uploadSessions.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    const session = {
+      ...values,
+      fileId: createUploadFileId(),
+      receivedParts: 0,
+      bytesReceived: 0,
+      lastTouchedAt: now
+    };
+    this.uploadSessions.set(sessionId, session);
+    return session;
   }
 
   async getClient() {

@@ -1,4 +1,6 @@
 const BRIDGE_ROUTE_PATH = '/telegram/file';
+const BRIDGE_UPLOAD_ROUTE_PATH = '/telegram/upload';
+const BRIDGE_CHUNK_UPLOAD_ROUTE_PATH = '/telegram/upload/chunk';
 const DEFAULT_TTL_SECONDS = 300;
 const encoder = new TextEncoder();
 
@@ -131,4 +133,109 @@ export function isMtprotoBridgeRequestExpired(payload, now = Date.now()) {
 
 export function getMtprotoBridgeRoutePath() {
   return BRIDGE_ROUTE_PATH;
+}
+
+export function buildMtprotoBridgeUploadPayload({
+  chatId,
+  fileName,
+  fileSize,
+  contentType = '',
+  sessionId = '',
+  totalParts = '',
+  expiresAt = Date.now() + DEFAULT_TTL_SECONDS * 1000
+}) {
+  const safeChatId = clean(chatId);
+  const safeSize = Number.parseInt(clean(fileSize), 10);
+  if (!safeChatId || !Number.isFinite(safeSize) || safeSize <= 0) {
+    return null;
+  }
+
+  return {
+    chatId: safeChatId,
+    name: sanitizeFileName(fileName, 'upload.bin'),
+    size: String(safeSize),
+    type: clean(contentType).slice(0, 160),
+    session: clean(sessionId),
+    parts: clean(totalParts),
+    expires: String(Math.max(1, Math.floor(expiresAt / 1000)))
+  };
+}
+
+export function serializeMtprotoBridgeUploadPayload(payload) {
+  return [
+    clean(payload?.chatId),
+    clean(payload?.name),
+    clean(payload?.size),
+    clean(payload?.type),
+    clean(payload?.session),
+    clean(payload?.parts),
+    clean(payload?.expires)
+  ].join('\n');
+}
+
+export async function signMtprotoBridgeUploadPayload(secret, payload) {
+  const normalizedSecret = clean(secret);
+  if (!normalizedSecret) {
+    throw new Error('TG_MT_BRIDGE_SECRET is required.');
+  }
+
+  return signText(normalizedSecret, serializeMtprotoBridgeUploadPayload(payload));
+}
+
+export async function verifyMtprotoBridgeUploadPayload(secret, payload, signature) {
+  const expected = await signMtprotoBridgeUploadPayload(secret, payload);
+  return constantTimeEqual(expected, signature);
+}
+
+export async function buildMtprotoBridgeUploadUrl({
+  baseUrl,
+  secret,
+  chatId,
+  fileName,
+  fileSize,
+  contentType,
+  sessionId,
+  totalParts,
+  chunked = false,
+  expiresAt
+}) {
+  const payload = buildMtprotoBridgeUploadPayload({
+    chatId,
+    fileName,
+    fileSize,
+    contentType,
+    sessionId,
+    totalParts,
+    expiresAt
+  });
+  if (!payload) {
+    return null;
+  }
+
+  const signature = await signMtprotoBridgeUploadPayload(secret, payload);
+  const url = new URL(chunked ? BRIDGE_CHUNK_UPLOAD_ROUTE_PATH : BRIDGE_UPLOAD_ROUTE_PATH, clean(baseUrl));
+  Object.entries(payload).forEach(([field, value]) => {
+    if (value) {
+      url.searchParams.set(field, value);
+    }
+  });
+  url.searchParams.set('sig', signature);
+  return url.toString();
+}
+
+export function isMtprotoBridgeUploadRequestExpired(payload, now = Date.now()) {
+  const expiresSeconds = Number.parseInt(clean(payload?.expires), 10);
+  if (!Number.isFinite(expiresSeconds) || expiresSeconds <= 0) {
+    return true;
+  }
+
+  return now > expiresSeconds * 1000;
+}
+
+export function getMtprotoBridgeUploadRoutePath() {
+  return BRIDGE_UPLOAD_ROUTE_PATH;
+}
+
+export function getMtprotoBridgeChunkUploadRoutePath() {
+  return BRIDGE_CHUNK_UPLOAD_ROUTE_PATH;
 }
