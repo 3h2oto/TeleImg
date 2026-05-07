@@ -55,6 +55,7 @@ Optional variables:
 - `TG_WEBHOOK_SECRET`
 - `TG_MT_BRIDGE_URL`
 - `TG_MT_BRIDGE_SECRET`
+- `TG_MT_BRIDGE_BACKEND` (`workers-free` or `external`, optional override when the bridge sits behind a custom domain)
 
 ### 3. Start Astro-only dev server
 
@@ -210,6 +211,11 @@ Set these two variables in Cloudflare Pages:
 
 - `TG_MT_BRIDGE_URL=https://your-bridge.example.com`
 - `TG_MT_BRIDGE_SECRET=replace_with_long_random_secret`
+
+Optional but recommended for upload routing when your bridge does **not** use a raw `*.workers.dev` hostname:
+
+- `TG_MT_BRIDGE_BACKEND=workers-free` for the Workers bridge
+- `TG_MT_BRIDGE_BACKEND=external` for the VPS/Rust bridge
 
 When Bot API `getFile` works, TeleImg still uses the normal bot file path.
 When Bot API says `file is too big`, TeleImg now issues a short-lived signed redirect to the Rust bridge.

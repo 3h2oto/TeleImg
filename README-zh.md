@@ -53,6 +53,7 @@ cp .dev.vars.example .dev.vars
 - `TG_WEBHOOK_SECRET`
 - `TG_MT_BRIDGE_URL`
 - `TG_MT_BRIDGE_SECRET`
+- `TG_MT_BRIDGE_BACKEND`（可选：`workers-free` 或 `external`，当 bridge 放在自定义域名后面时可显式覆盖后端类型）
 
 ### 3. 仅启动 Astro 前端
 
@@ -208,6 +209,11 @@ curl http://127.0.0.1:8788/healthz
 
 - `TG_MT_BRIDGE_URL=https://your-bridge.example.com`
 - `TG_MT_BRIDGE_SECRET=replace_with_long_random_secret`
+
+如果 bridge **不是** 直接用 `*.workers.dev` 域名，建议额外显式设置：
+
+- Workers bridge：`TG_MT_BRIDGE_BACKEND=workers-free`
+- VPS / Rust bridge：`TG_MT_BRIDGE_BACKEND=external`
 
 之后行为会变成：
 

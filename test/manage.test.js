@@ -297,17 +297,9 @@ describe('manage endpoints', () => {
     expect(browsePayload.files[0].davPath).toBe('/porn/白石なお/movie.mp4');
   });
 
-  it('prepares a direct signed MTProto upload URL for external bridges', async () => {
-    global.fetch = vi.fn(async (input) => {
-      const url = typeof input === 'string' ? input : input.url;
-      expect(url).toBe('https://bridge.example.com/healthz');
-      return new Response(JSON.stringify({
-        ok: true,
-        authorized: true
-      }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      });
+  it('prepares a direct signed MTProto upload URL without blocking on bridge health', async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error('prepare should not call bridge health');
     });
 
     const env = { img_url: createKv() };
@@ -327,23 +319,20 @@ describe('manage endpoints', () => {
     expect(payload.uploadUrl).toContain('https://bridge.example.com/telegram/upload?');
     expect(payload.chunkSize).toBeNull();
     expect(payload.parallelChunks).toBe(1);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('prepares a chunked upload for large files when the bridge backend is workers-free', async () => {
-    global.fetch = vi.fn(async () => new Response(JSON.stringify({
-      ok: true,
-      freePlanReady: true,
-      authorized: true
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    }));
+  it('prepares a chunked upload for large files from static bridge backend config', async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error('prepare should not call bridge health');
+    });
 
     const env = { img_url: createKv() };
     const response = await mtprotoUpload({
       env: {
         TG_MT_BRIDGE_URL: 'https://bridge.example.com',
         TG_MT_BRIDGE_SECRET: 'secret',
+        TG_MT_BRIDGE_BACKEND: 'workers-free',
         TG_Chat_ID: '-1002389146660',
         img_url: env.img_url
       },
@@ -357,6 +346,30 @@ describe('manage endpoints', () => {
     expect(payload.parallelChunks).toBe(mtprotoUploadTest.WORKERS_PARALLEL_CHUNK_UPLOADS);
     expect(payload.totalParts).toBeGreaterThan(1);
     expect(payload.uploadUrl).toContain('/telegram/upload/chunk?');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('infers workers-free chunked uploads from a workers.dev bridge host without health probing', async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error('prepare should not call bridge health');
+    });
+
+    const env = { img_url: createKv() };
+    const response = await mtprotoUpload({
+      env: {
+        TG_MT_BRIDGE_URL: 'https://workers-mtproto-bridge.example.workers.dev',
+        TG_MT_BRIDGE_SECRET: 'secret',
+        TG_Chat_ID: '-1002389146660',
+        img_url: env.img_url
+      },
+      request: new Request(`https://example.com/api/manage/mtproto/upload?path=/albums&name=huge.mp4&size=${mtprotoUploadTest.WORKERS_DIRECT_UPLOAD_LIMIT + 1}&type=video/mp4`)
+    });
+
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload.mode).toBe('chunked');
+    expect(payload.bridge.backend).toBe('workers-free');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('stores a pending MTProto DAV target when finalize runs before webhook metadata arrives', async () => {

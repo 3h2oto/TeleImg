@@ -1,4 +1,4 @@
-import { summarizeBridgeHealth } from '../../../_lib/bridge-health.js';
+import { describeBridgeConfig } from '../../../_lib/bridge-health.js';
 import { json, methodNotAllowed, serviceUnavailable } from '../../../_lib/http.js';
 import { claimMtprotoUploadTargetByMessage, saveMtprotoUploadTarget } from '../../../_lib/mtproto-upload.js';
 import { getRuntimeConfig } from '../../../_lib/runtime-config.js';
@@ -71,15 +71,9 @@ async function prepareUpload(context, config) {
     return json({ error: 'A positive file size is required.' }, { status: 400 });
   }
 
-  const bridge = await summarizeBridgeHealth(config);
+  const bridge = describeBridgeConfig(config);
   if (!bridge.configured) {
     return serviceUnavailable('MTProto bridge is not configured.');
-  }
-  if (!bridge.ok) {
-    return json({
-      error: bridge.error || 'MTProto bridge is unavailable.',
-      bridge
-    }, { status: 503 });
   }
 
   const chunked = bridge.backend === 'workers-free' && fileSize > WORKERS_DIRECT_UPLOAD_LIMIT;

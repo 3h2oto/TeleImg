@@ -9,6 +9,7 @@ const RUNTIME_KEYS = [
   'TG_WEBHOOK_SECRET',
   'TG_MT_BRIDGE_URL',
   'TG_MT_BRIDGE_SECRET',
+  'TG_MT_BRIDGE_BACKEND',
   'PUBLIC_BASE_URL',
   'ModerateContentApiKey'
 ];
