@@ -29,26 +29,24 @@
         <button type="button" class="ghost-button" data-action="refresh-folder">刷新当前目录</button>
         <button type="button" class="ghost-button" data-action="toggle-view">切换视图</button>
       </div>
-      <div class="admin-pane__chips" data-role="workspace-chips"></div>
     </section>
 
     <section class="admin-pane__group">
       <div class="admin-pane__group-head">
         <strong>Telegram / 桥接</strong>
       </div>
-      <div class="admin-pane__buttons">
-        <button type="button" class="ghost-button" data-action="telegram-status">Telegram 状态</button>
-        <button type="button" class="ghost-button" data-action="bridge-warmup">桥接自检</button>
-        <button type="button" class="ghost-button" data-action="telegram-sync">同步直传</button>
-        <button type="button" class="ghost-button" data-action="telegram-webhook">配置 Webhook</button>
-      </div>
-      <div class="admin-pane__info-grid" data-role="telegram-info"></div>
       <section class="bridge-panel admin-pane__bridge" data-role="bridge-panel">
         <div class="bridge-panel__header">
-          <strong>大文件桥接状态</strong>
+          <strong>Telegram / 桥接</strong>
           <span class="meta-chip">等待状态刷新</span>
         </div>
-        <p class="muted-text">桥接状态会显示在这里。</p>
+        <div class="admin-pane__buttons admin-pane__buttons--inline">
+          <button type="button" class="ghost-button" data-action="telegram-status">Telegram 状态</button>
+          <button type="button" class="ghost-button" data-action="bridge-warmup">桥接自检</button>
+          <button type="button" class="ghost-button" data-action="telegram-sync">同步直传</button>
+          <button type="button" class="ghost-button" data-action="telegram-webhook">配置 Webhook</button>
+        </div>
+        <p class="muted-text">Telegram 直传与大文件桥接的状态会统一显示在这里。</p>
       </section>
     </section>
   </div>
@@ -63,26 +61,19 @@
     root.dataset.bound = 'true';
 
     const bus = ensureAdminBus();
-    const chips = root.querySelector('[data-role="workspace-chips"]');
-    const telegramInfo = root.querySelector('[data-role="telegram-info"]');
     const bridgePanel = root.querySelector('[data-role="bridge-panel"]');
     let collapsed = false;
 
     const renderBridgePanel = (bridge) => {
-      if (!bridge?.configured) {
-        bridgePanel.innerHTML = `
-          <div class="bridge-panel__header">
-            <strong>大文件桥接状态</strong>
-            <span class="meta-chip">未配置</span>
-          </div>
-          <p class="muted-text">当前主站没有配置 MTProto 大文件桥接。</p>
-        `;
-        return;
-      }
-
-      const tone = bridge.ok ? 'ok' : 'error';
-      const health = bridge.health || {};
-      const rows = [
+      const telegram = bus.state.telegramStatus || {};
+      const health = bridge?.health || {};
+      const infoRows = [
+        ['Bot', telegram?.bot?.username ? `@${telegram.bot.username}` : '未知'],
+        ['Webhook', telegram?.webhook?.url || '未配置'],
+        ['Pending', Number.isFinite(telegram?.webhook?.pending_update_count) ? String(telegram.webhook.pending_update_count) : '未知'],
+        ['最近 webhook', telegram?.syncState?.lastWebhookAt ? formatTime(telegram.syncState.lastWebhookAt) : '无'],
+        ['最近 sync', telegram?.syncState?.lastSyncAt ? formatTime(telegram.syncState.lastSyncAt) : '无'],
+        ['桥接状态', !bridge?.configured ? '未配置' : (bridge.ok ? '在线' : '异常')],
         ['后端', bridge.backend === 'workers-free' ? 'Workers Free' : '外置桥接'],
         ['域名', bridge.host || '未知'],
         ['桥连接', health.connected === undefined ? '未知' : (health.connected ? '已连' : '未连')],
@@ -93,41 +84,24 @@
 
       bridgePanel.innerHTML = `
         <div class="bridge-panel__header">
-          <strong>大文件桥接状态</strong>
-          <span class="meta-chip bridge-panel__tone" data-tone="${tone}">${bridge.ok ? '在线' : '异常'}</span>
+          <strong>Telegram / 桥接</strong>
+          <span class="meta-chip bridge-panel__tone" data-tone="${bridge?.configured ? (bridge.ok ? 'ok' : 'error') : 'idle'}">${bridge?.configured ? (bridge.ok ? '在线' : '异常') : '未配置'}</span>
         </div>
-        <dl class="bridge-panel__grid">
-          ${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}
+        <div class="admin-pane__buttons admin-pane__buttons--inline">
+          <button type="button" class="ghost-button" data-action="telegram-status">Telegram 状态</button>
+          <button type="button" class="ghost-button" data-action="bridge-warmup">桥接自检</button>
+          <button type="button" class="ghost-button" data-action="telegram-sync">同步直传</button>
+          <button type="button" class="ghost-button" data-action="telegram-webhook">配置 Webhook</button>
+        </div>
+        <dl class="bridge-panel__grid admin-pane__panel-grid">
+          ${infoRows.map(([label, value]) => `<div><dt>${label}</dt><dd title="${value}">${value}</dd></div>`).join('')}
         </dl>
       `;
     };
 
-    const render = (state) => {
-      const filtered = bus.getFilteredItems();
-      const selected = bus.getSelectedItem();
-      chips.innerHTML = [
-        `视图：${state.view}`,
-        `当前目录：${state.currentPath}`,
-        `当前结果：${filtered.length}`,
-        selected ? `已选中文件：${selected.metadata?.fileName || selected.davName || selected.name}` : '已选中文件：无'
-      ].map((text) => `<span class="meta-chip">${text}</span>`).join('');
-
-      const telegram = state.telegramStatus;
+    const render = () => {
+      const telegram = bus.state.telegramStatus;
       const bridge = telegram?.bridge;
-      const infoRows = [
-        ['Bot', telegram?.bot?.username ? `@${telegram.bot.username}` : '未知'],
-        ['Webhook', telegram?.webhook?.url || '未配置'],
-        ['Pending', Number.isFinite(telegram?.webhook?.pending_update_count) ? String(telegram.webhook.pending_update_count) : '未知'],
-        ['桥接域名', bridge?.configured ? (bridge.host || '未知') : '未配置'],
-        ['最近 webhook', telegram?.syncState?.lastWebhookAt ? formatTime(telegram.syncState.lastWebhookAt) : '无'],
-        ['最近 sync', telegram?.syncState?.lastSyncAt ? formatTime(telegram.syncState.lastSyncAt) : '无']
-      ].filter(Boolean);
-      telegramInfo.innerHTML = infoRows.map(([label, value]) => `
-        <div class="admin-info-card">
-          <dt>${label}</dt>
-          <dd title="${value}">${value}</dd>
-        </div>
-      `).join('');
       renderBridgePanel(bridge);
     };
 
@@ -208,42 +182,39 @@
     margin-top: 18px;
   }
 
-  .admin-pane__chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .admin-pane__info-grid {
-    display: grid;
-    gap: 10px;
-    grid-template-columns: 1fr;
+  .admin-pane__bridge {
     margin-top: 14px;
   }
 
-  .admin-info-card {
+  .admin-pane__buttons--inline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bridge-panel__grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .bridge-panel__grid div {
     padding: 12px 14px;
     border-radius: 16px;
     border: 1px solid rgba(168, 255, 96, 0.08);
     background: #101010;
+    min-width: 0;
   }
 
-  .admin-info-card dt {
+  .bridge-panel__grid dt {
     margin-bottom: 6px;
     color: var(--muted);
     font-size: 0.82rem;
   }
 
-  .admin-info-card dd {
+  .bridge-panel__grid dd {
     margin: 0;
     color: var(--text);
     font-size: 0.94rem;
     line-height: 1.5;
     word-break: break-word;
-  }
-
-  .admin-pane__bridge {
-    margin-top: 14px;
   }
 </style>

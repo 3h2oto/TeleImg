@@ -12,17 +12,17 @@
       <button type="submit" class="primary-button">搜索</button>
       <button type="button" class="ghost-button" data-action="reset-search">清空</button>
     </form>
+
+    <section class="preview-strip is-empty" data-role="details">
+      <div class="preview-strip__empty">
+        <strong>未选中文件</strong>
+        <span class="muted-text">点击卡片可选中，双击打开。</span>
+      </div>
+    </section>
   </div>
 
   <p class="status-line" data-role="status">正在加载...</p>
   <div class="summary-row admin-folder-summary" data-role="summary"></div>
-
-  <section class="details-drawer is-empty" data-role="details">
-    <div class="details-drawer__empty">
-      <strong>未选中文件</strong>
-      <p class="muted-text">点击卡片可选中，双击打开；支持方向键切换、Enter 打开、Backspace 返回上级目录。</p>
-    </div>
-  </section>
 
   <div class="admin-grid explorer-grid" data-role="grid"></div>
 </main>
@@ -100,41 +100,34 @@
 
     const renderDetails = (item) => {
       if (!item) {
-        details.className = 'details-drawer is-empty';
+        details.className = 'preview-strip is-empty';
         details.innerHTML = `
-          <div class="details-drawer__empty">
+          <div class="preview-strip__empty">
             <strong>未选中文件</strong>
-            <p class="muted-text">点击卡片可选中，双击打开；支持方向键切换、Enter 打开、Backspace 返回上级目录。</p>
+            <span class="muted-text">点击卡片可选中，双击打开。</span>
           </div>
         `;
         return;
       }
 
       const telegram = item.metadata?.telegram;
-      details.className = 'details-drawer';
+      details.className = 'preview-strip is-selected';
       details.innerHTML = `
-        <div class="details-drawer__head">
-          <div class="details-drawer__title">
-            <strong>${item.metadata?.fileName || item.davName || item.name}</strong>
-            <p class="muted-text">${item.name}</p>
-          </div>
-          <div class="toolbar-row compact">
-            <button type="button" class="ghost-button" data-action="open-selected">打开</button>
-            <button type="button" class="ghost-button" data-action="clear-selection">取消选择</button>
-          </div>
+        <div class="preview-strip__preview">
+          ${isVideo(item.name)
+            ? `<video muted playsinline preload="metadata" src="${item.url}"></video>`
+            : isAudio(item.name)
+              ? `<div class="audio-card"><span>🎵</span></div>`
+              : `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.name}" />`}
         </div>
-        <div class="meta-chip-row">
-          <span class="meta-chip">${item.davPath || '/'}</span>
-          <span class="meta-chip">${formatBytes(item.metadata?.fileSize)}</span>
-          <span class="meta-chip">${formatTime(item.metadata?.TimeStamp)}</span>
-          <span class="meta-chip">${telegram?.chatTitle || telegram?.chatId || '未记录聊天'}</span>
+        <div class="preview-strip__meta">
+          <strong>${item.metadata?.fileName || item.davName || item.name}</strong>
+          <span class="muted-text">${item.davPath || '/'}</span>
+          <span class="muted-text">${formatBytes(item.metadata?.fileSize)} · ${formatTime(item.metadata?.TimeStamp)} · ${telegram?.chatTitle || telegram?.chatId || '未记录聊天'}</span>
         </div>
-        <div class="details-drawer__meta-row">
-          <div class="details-drawer__meta-card"><dt>来源</dt><dd>${item.metadata?.source || 'unknown'}</dd></div>
-          <div class="details-drawer__meta-card"><dt>消息</dt><dd>${telegram?.messageId || '未记录'}</dd></div>
-          <div class="details-drawer__meta-card"><dt>远端删除</dt><dd>${item.canDeleteTelegram ? '支持' : '仅删 KV'}</dd></div>
-        </div>
-        <div class="toolbar-row details-drawer__actions">
+        <div class="preview-strip__actions">
+          <button type="button" class="ghost-button" data-action="open-selected">打开</button>
+          <button type="button" class="ghost-button" data-action="clear-selection">取消选择</button>
           <button type="button" class="ghost-button" data-action="copy" data-key="${item.name}">复制链接</button>
           <button type="button" class="ghost-button" data-action="rename" data-key="${item.name}">重命名</button>
           <button type="button" class="ghost-button" data-action="like" data-key="${item.name}">${item.metadata?.liked ? '取消收藏' : '收藏'}</button>
@@ -365,7 +358,7 @@
     top: 12px;
     z-index: 5;
     display: grid;
-    gap: 12px;
+    gap: 8px;
     padding-bottom: 8px;
     background: linear-gradient(180deg, rgba(9, 9, 9, 0.98), rgba(9, 9, 9, 0.92) 72%, rgba(9, 9, 9, 0));
   }
@@ -373,79 +366,94 @@
   .admin-stage__topline {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 10px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
   }
 
   .admin-stage__headline {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .admin-breadcrumbs,
+  .admin-folder-context {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .preview-strip {
+    display: grid;
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(168, 255, 96, 0.1);
+    background: #0b0b0b;
+    min-height: 62px;
+  }
+
+  .preview-strip.is-empty {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-strip__empty {
+    display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  .details-drawer {
+  .preview-strip__preview {
+    width: 160px;
+    height: 32px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: #050505;
     display: grid;
-    gap: 14px;
-    padding: 16px;
-    border-radius: 22px;
-    border: 1px solid rgba(168, 255, 96, 0.1);
-    background: #0b0b0b;
+    place-items: center;
   }
 
-  .details-drawer.is-empty {
-    display: block;
+  .preview-strip__preview img,
+  .preview-strip__preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
-  .details-drawer__empty {
-    padding: 8px 6px;
+  .preview-strip__meta {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
   }
 
-  .details-drawer__head {
+  .preview-strip__meta strong,
+  .preview-strip__meta span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-strip__meta strong {
+    font-size: 0.98rem;
+  }
+
+  .preview-strip__actions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 12px;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
-  .details-drawer__title strong,
-  .details-drawer__head strong {
-    font-size: 1.35rem;
-  }
-
-  .details-drawer__title p,
-  .details-drawer__head p {
-    margin: 6px 0 0;
-    word-break: break-all;
-  }
-
-  .details-drawer__meta-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 10px;
-  }
-
-  .details-drawer__meta-card {
-    border-radius: 14px;
-    border: 1px solid rgba(168, 255, 96, 0.08);
-    background: #101010;
-    padding: 12px 14px;
-  }
-
-  .details-drawer__meta-card dt {
-    margin-bottom: 6px;
-    color: var(--muted);
-    font-size: 0.88rem;
-  }
-
-  .details-drawer__meta-card dd {
-    margin: 0;
-    word-break: break-word;
-  }
-
-  .details-drawer__actions {
-    gap: 10px;
+  .preview-strip__actions .ghost-button {
+    min-width: 72px;
   }
 
   .explorer-grid {
@@ -469,7 +477,19 @@
     box-shadow: 0 0 0 1px rgba(57, 242, 174, 0.18), 0 14px 42px rgba(0, 0, 0, 0.24);
   }
 
+  .explorer-card {
+    scroll-margin-top: 160px;
+  }
+
+  .explorer-card.is-selected .preview-frame {
+    outline: 1px solid rgba(57, 242, 174, 0.16);
+  }
+
   .explorer-grid[data-view='waterfall'] .explorer-card.is-selected {
     box-shadow: 0 0 0 1px rgba(57, 242, 174, 0.16);
+  }
+
+  .explorer-grid .toolbar-row.compact {
+    flex-wrap: wrap;
   }
 </style>
