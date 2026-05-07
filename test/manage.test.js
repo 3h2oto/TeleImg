@@ -326,6 +326,7 @@ describe('manage endpoints', () => {
     expect(payload.mode).toBe('direct');
     expect(payload.uploadUrl).toContain('https://bridge.example.com/telegram/upload?');
     expect(payload.chunkSize).toBeNull();
+    expect(payload.parallelChunks).toBe(1);
   });
 
   it('prepares a chunked upload for large files when the bridge backend is workers-free', async () => {
@@ -353,6 +354,7 @@ describe('manage endpoints', () => {
     expect(response.status).toBe(200);
     expect(payload.mode).toBe('chunked');
     expect(payload.chunkSize).toBe(mtprotoUploadTest.WORKERS_CHUNK_SIZE);
+    expect(payload.parallelChunks).toBe(mtprotoUploadTest.WORKERS_PARALLEL_CHUNK_UPLOADS);
     expect(payload.totalParts).toBeGreaterThan(1);
     expect(payload.uploadUrl).toContain('/telegram/upload/chunk?');
   });

@@ -6,6 +6,7 @@ import { buildMtprotoBridgeUploadUrl } from '../../../../shared/mtproto-bridge.j
 
 const WORKERS_DIRECT_UPLOAD_LIMIT = 95 * 1024 * 1024;
 const WORKERS_CHUNK_SIZE = 8 * 1024 * 1024;
+const WORKERS_PARALLEL_CHUNK_UPLOADS = 3;
 
 function sanitizeRequestedFileName(input) {
   const value = String(input || '')
@@ -108,7 +109,8 @@ async function prepareUpload(context, config) {
     contentType,
     bridge,
     chunkSize: chunked ? WORKERS_CHUNK_SIZE : null,
-    totalParts: chunked ? totalParts : null
+    totalParts: chunked ? totalParts : null,
+    parallelChunks: chunked ? WORKERS_PARALLEL_CHUNK_UPLOADS : 1
   });
 }
 
@@ -160,5 +162,6 @@ export async function onRequest(context) {
 
 export const __test = {
   WORKERS_DIRECT_UPLOAD_LIMIT,
-  WORKERS_CHUNK_SIZE
+  WORKERS_CHUNK_SIZE,
+  WORKERS_PARALLEL_CHUNK_UPLOADS
 };

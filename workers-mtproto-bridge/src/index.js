@@ -325,8 +325,8 @@ async function uploadRequestStream(client, body, size, fileName) {
 
     while (pending.byteLength >= partSize) {
       const current = pending.subarray(0, partSize);
-      pending = pending.subarray(partSize);
       await sendPart(current);
+      pending = pending.subarray(partSize);
     }
   }
 
@@ -680,9 +680,8 @@ export class MtprotoBridgeDO {
     const fileSize = parseContentLength(payload?.size);
     const totalParts = parseContentLength(payload?.parts);
     const part = Number.parseInt(url.searchParams.get('part') || '', 10);
-    const isFinal = url.searchParams.get('final') === '1';
 
-    if (!chatId || !sessionId || !fileSize || !totalParts || !Number.isFinite(part) || part < 0) {
+    if (!chatId || !sessionId || !fileSize || !totalParts || !Number.isFinite(part) || part < 0 || part >= totalParts) {
       throw new Error('Invalid chunk upload parameters.');
     }
     if (!request.body) {
@@ -690,71 +689,217 @@ export class MtprotoBridgeDO {
     }
 
     const chunkBuffer = Buffer.from(await request.arrayBuffer());
+    if (!chunkBuffer.byteLength) {
+      throw new Error('Chunk upload body is empty.');
+    }
+
     const client = await this.getClient();
-    const entity = await this.resolveEntity(client, chatId);
     const session = this.ensureUploadSession(sessionId, {
       chatId,
       fileName,
       contentType,
       fileSize,
-      totalParts,
-      entity
+      totalParts
+    });
+    if (!session.entity) {
+      session.entity = await this.resolveEntity(client, chatId);
+    }
+
+    const result = await this.runUploadSessionOperation(session, async () => {
+      session.lastTouchedAt = Date.now();
+      if (session.uploadResult) {
+        return {
+          status: 200,
+          body: this.buildChunkUploadProgress(session, {
+            complete: true,
+            duplicate: true,
+            upload: session.uploadResult
+          })
+        };
+      }
+
+      if (session.receivedChunkNumbers.has(part)) {
+        await this.flushChunkUploadSession(client, session);
+        if (this.isChunkUploadSessionComplete(session)) {
+          const upload = await this.finalizeChunkUploadSession(client, session);
+          return {
+            status: 200,
+            body: this.buildChunkUploadProgress(session, {
+              complete: true,
+              duplicate: true,
+              upload
+            })
+          };
+        }
+        return {
+          status: 200,
+          body: this.buildChunkUploadProgress(session, {
+            duplicate: true
+          })
+        };
+      }
+
+      session.receivedChunkNumbers.add(part);
+      session.receivedChunkCount += 1;
+      session.bytesReceived += chunkBuffer.byteLength;
+      if (session.bytesReceived > session.fileSize) {
+        throw new Error(`Chunked upload size overflow: expected ${session.fileSize}, received ${session.bytesReceived}.`);
+      }
+
+      session.chunkBuffers.set(part, chunkBuffer);
+      await this.flushChunkUploadSession(client, session);
+      session.lastTouchedAt = Date.now();
+
+      if (!this.isChunkUploadSessionComplete(session)) {
+        return {
+          status: 200,
+          body: this.buildChunkUploadProgress(session)
+        };
+      }
+
+      const upload = await this.finalizeChunkUploadSession(client, session);
+      return {
+        status: 201,
+        body: this.buildChunkUploadProgress(session, {
+          complete: true,
+          upload
+        })
+      };
     });
 
-    if (session.receivedChunks !== part) {
-      throw new Error(`Unexpected upload chunk ${part}; expected ${session.receivedChunks}.`);
-    }
+    return uploadJson(result.body, {
+      status: result.status,
+      headers: { 'cache-control': 'no-store' }
+    });
+  }
 
-    session.pending = session.pending.byteLength ? Buffer.concat([session.pending, chunkBuffer]) : chunkBuffer;
-    while (session.pending.byteLength >= session.telegramPartSize) {
-      const current = session.pending.subarray(0, session.telegramPartSize);
-      session.pending = session.pending.subarray(session.telegramPartSize);
-      const ok = await client.invoke(new Api.upload.SaveBigFilePart({
-        fileId: session.fileId,
-        filePart: session.telegramPartIndex,
-        fileTotalParts: session.telegramTotalParts,
-        bytes: current
-      }));
-      if (!ok) {
-        throw new Error(`Telegram refused upload part ${session.telegramPartIndex}.`);
+  ensureUploadSession(sessionId, values) {
+    const now = Date.now();
+    for (const [key, session] of this.uploadSessions) {
+      if (Number(session?.lastTouchedAt || 0) + UPLOAD_SESSION_TTL_MS < now) {
+        this.uploadSessions.delete(key);
       }
-      session.telegramPartIndex += 1;
     }
 
-    session.receivedChunks += 1;
-    session.bytesReceived += chunkBuffer.byteLength;
-    session.lastTouchedAt = Date.now();
+    const existing = this.uploadSessions.get(sessionId);
+    if (existing) {
+      if (
+        existing.chatId !== values.chatId
+        || existing.fileName !== values.fileName
+        || existing.contentType !== values.contentType
+        || existing.fileSize !== values.fileSize
+        || existing.totalChunks !== Number(values.totalParts)
+      ) {
+        throw new Error('Upload session parameters do not match the existing session.');
+      }
+      existing.lastTouchedAt = now;
+      return existing;
+    }
 
-    const complete = isFinal || session.receivedChunks >= session.totalChunks || session.bytesReceived >= session.fileSize;
-    if (!complete) {
-      return uploadJson({
-        ok: true,
-        complete: false,
-        receivedParts: session.receivedChunks,
-        totalParts: session.totalChunks,
-        uploadedBytes: session.bytesReceived,
-        fileSize: session.fileSize
-      }, {
-        status: 200,
-        headers: { 'cache-control': 'no-store' }
-      });
+    const telegramPartSize = utils.getAppropriatedPartSize(bigInt(values.fileSize)) * 1024;
+    const session = {
+      ...values,
+      fileId: createUploadFileId(),
+      totalChunks: Number(values.totalParts),
+      receivedChunkCount: 0,
+      receivedChunkNumbers: new Set(),
+      chunkBuffers: new Map(),
+      nextChunkToFlush: 0,
+      telegramPartSize,
+      telegramTotalParts: Math.floor((values.fileSize + telegramPartSize - 1) / telegramPartSize),
+      telegramPartIndex: 0,
+      bytesReceived: 0,
+      pending: Buffer.alloc(0),
+      uploadResult: null,
+      operationTail: null,
+      lastTouchedAt: now
+    };
+    this.uploadSessions.set(sessionId, session);
+    return session;
+  }
+
+  buildChunkUploadProgress(session, extra = {}) {
+    return {
+      ok: true,
+      complete: Boolean(session.uploadResult),
+      receivedParts: session.receivedChunkCount,
+      totalParts: session.totalChunks,
+      uploadedBytes: session.bytesReceived,
+      fileSize: session.fileSize,
+      flushedParts: session.nextChunkToFlush,
+      ...extra
+    };
+  }
+
+  async runUploadSessionOperation(session, operation) {
+    const previous = session.operationTail || Promise.resolve();
+    let release = null;
+    const next = new Promise((resolve) => {
+      release = resolve;
+    });
+    session.operationTail = next;
+
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (session.operationTail === next) {
+        session.operationTail = null;
+      }
+    }
+  }
+
+  async sendChunkUploadTelegramPart(client, session, bytes, { final = false } = {}) {
+    const filePart = session.telegramPartIndex;
+    const ok = await client.invoke(new Api.upload.SaveBigFilePart({
+      fileId: session.fileId,
+      filePart,
+      fileTotalParts: session.telegramTotalParts,
+      bytes
+    }));
+    if (!ok) {
+      throw new Error(`Telegram refused ${final ? 'final ' : ''}upload part ${filePart}.`);
+    }
+    session.telegramPartIndex += 1;
+  }
+
+  async flushChunkUploadSession(client, session) {
+    while (session.chunkBuffers.has(session.nextChunkToFlush)) {
+      const chunk = session.chunkBuffers.get(session.nextChunkToFlush);
+      session.chunkBuffers.delete(session.nextChunkToFlush);
+      session.nextChunkToFlush += 1;
+      session.pending = session.pending.byteLength ? Buffer.concat([session.pending, chunk]) : chunk;
+
+      while (session.pending.byteLength >= session.telegramPartSize) {
+        const current = session.pending.subarray(0, session.telegramPartSize);
+        await this.sendChunkUploadTelegramPart(client, session, current);
+        session.pending = session.pending.subarray(session.telegramPartSize);
+      }
+    }
+  }
+
+  isChunkUploadSessionComplete(session) {
+    return session.receivedChunkCount === session.totalChunks
+      && session.nextChunkToFlush === session.totalChunks
+      && session.bytesReceived === session.fileSize;
+  }
+
+  async finalizeChunkUploadSession(client, session) {
+    if (session.uploadResult) {
+      return session.uploadResult;
     }
 
     if (session.bytesReceived !== session.fileSize) {
       throw new Error(`Chunked upload size mismatch: expected ${session.fileSize}, received ${session.bytesReceived}.`);
     }
 
+    if (session.nextChunkToFlush !== session.totalChunks) {
+      throw new Error(`Chunked upload order mismatch: expected ${session.totalChunks} chunks, flushed ${session.nextChunkToFlush}.`);
+    }
+
     if (session.pending.byteLength > 0) {
-      const ok = await client.invoke(new Api.upload.SaveBigFilePart({
-        fileId: session.fileId,
-        filePart: session.telegramPartIndex,
-        fileTotalParts: session.telegramTotalParts,
-        bytes: session.pending
-      }));
-      if (!ok) {
-        throw new Error(`Telegram refused final upload part ${session.telegramPartIndex}.`);
-      }
-      session.telegramPartIndex += 1;
+      await this.sendChunkUploadTelegramPart(client, session, session.pending, { final: true });
       session.pending = Buffer.alloc(0);
     }
 
@@ -775,52 +920,18 @@ export class MtprotoBridgeDO {
       supportsStreaming: session.contentType.startsWith('video/')
     });
 
-    this.uploadSessions.delete(sessionId);
-    return uploadJson({
-      ok: true,
-      complete: true,
-      upload: {
-        chatId: message?.chatId?.toString?.() || chatId,
-        messageId: Number(message?.id || 0),
-        fileName: session.fileName,
-        contentType: session.contentType,
-        fileSize: session.fileSize,
-        mediaKind: 'document'
-      }
-    }, {
-      status: 201,
-      headers: { 'cache-control': 'no-store' }
-    });
-  }
-
-  ensureUploadSession(sessionId, values) {
-    const now = Date.now();
-    for (const [key, session] of this.uploadSessions) {
-      if (Number(session?.lastTouchedAt || 0) + UPLOAD_SESSION_TTL_MS < now) {
-        this.uploadSessions.delete(key);
-      }
-    }
-
-    const existing = this.uploadSessions.get(sessionId);
-    if (existing) {
-      return existing;
-    }
-
-    const telegramPartSize = utils.getAppropriatedPartSize(bigInt(values.fileSize)) * 1024;
-    const session = {
-      ...values,
-      fileId: createUploadFileId(),
-      totalChunks: Number(values.totalParts),
-      receivedChunks: 0,
-      telegramPartSize,
-      telegramTotalParts: Math.floor((values.fileSize + telegramPartSize - 1) / telegramPartSize),
-      telegramPartIndex: 0,
-      bytesReceived: 0,
-      pending: Buffer.alloc(0),
-      lastTouchedAt: now
+    session.uploadResult = {
+      chatId: message?.chatId?.toString?.() || session.chatId,
+      messageId: Number(message?.id || 0),
+      fileName: session.fileName,
+      contentType: session.contentType,
+      fileSize: session.fileSize,
+      mediaKind: 'document'
     };
-    this.uploadSessions.set(sessionId, session);
-    return session;
+    session.chunkBuffers.clear();
+    session.pending = Buffer.alloc(0);
+    session.lastTouchedAt = Date.now();
+    return session.uploadResult;
   }
 
   async getClient() {

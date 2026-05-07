@@ -147,6 +147,7 @@ function createUploadTask(file, currentPath) {
     progress: 0,
     uploadedBytes: 0,
     completedParts: 0,
+    completedPartNumbers: [],
     totalParts: 1,
     retryCount: 0,
     error: '',
@@ -159,6 +160,7 @@ function createUploadTask(file, currentPath) {
 }
 
 const UPLOAD_URL_REFRESH_WINDOW_MS = 45 * 1000;
+const DEFAULT_CHUNK_UPLOAD_CONCURRENCY = 3;
 
 function uploadExpiresAtMs(taskOrPrepared) {
   const expiresAt = Number(taskOrPrepared?.expiresAt || 0);
@@ -178,6 +180,27 @@ function shouldRefreshUploadSignature(taskOrPrepared) {
 
 function isExpiredUploadErrorMessage(message) {
   return /signed upload url has expired/i.test(String(message || ''));
+}
+
+function getChunkBounds(part, chunkSize, fileSize) {
+  const start = part * chunkSize;
+  const end = Math.min(fileSize, start + chunkSize);
+  return {
+    start,
+    end,
+    size: Math.max(0, end - start)
+  };
+}
+
+function normalizeCompletedPartNumbers(parts, totalParts) {
+  if (!Array.isArray(parts) || totalParts <= 0) {
+    return [];
+  }
+
+  return [...new Set(parts
+    .map((value) => Number.parseInt(String(value ?? ''), 10))
+    .filter((value) => Number.isFinite(value) && value >= 0 && value < totalParts))]
+    .sort((left, right) => left - right);
 }
 
 export function ensureAdminBus() {
@@ -677,8 +700,28 @@ export function ensureAdminBus() {
     }
 
     const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(task.fileSize / chunkSize)));
+    const parallelChunks = Math.max(1, Math.min(
+      Number(prepared.parallelChunks || DEFAULT_CHUNK_UPLOAD_CONCURRENCY) || DEFAULT_CHUNK_UPLOAD_CONCURRENCY,
+      5,
+      totalParts
+    ));
+    const resumedParts = normalizeCompletedPartNumbers(task.completedPartNumbers, totalParts);
+    const completedSet = new Set(resumedParts);
+    let completedBytes = resumedParts.reduce((sum, part) => sum + getChunkBounds(part, chunkSize, task.fileSize).size, 0);
     let finalPayload = null;
     let activePrepared = prepared;
+    let refreshPromise = null;
+    let nextQueueIndex = 0;
+    let fatalError = null;
+    const inFlightControllers = new Set();
+    const pendingParts = [];
+
+    for (let part = startPart; part < totalParts; part += 1) {
+      if (!completedSet.has(part)) {
+        pendingParts.push(part);
+      }
+    }
+
     replaceUploadTask(task.id, {
       mode: 'chunked',
       totalParts,
@@ -686,73 +729,138 @@ export function ensureAdminBus() {
       expiresAt: prepared.expiresAt || null,
       phase: 'uploading',
       status: 'uploading',
-      canRetry: false
+      canRetry: false,
+      completedParts: completedSet.size,
+      completedPartNumbers: [...completedSet],
+      uploadedBytes: completedBytes
     });
 
-    for (let part = startPart; part < totalParts; part += 1) {
-      if (shouldRefreshUploadSignature(activePrepared)) {
-        activePrepared = await refreshPreparedUpload(task.id, {
-          ...task,
-          sessionId: activePrepared.sessionId || task.sessionId || ''
-        }, { reuseSession: true });
+    const refreshSignedUpload = async () => {
+      if (!refreshPromise) {
+        refreshPromise = (async () => {
+          const refreshed = await refreshPreparedUpload(task.id, {
+            ...task,
+            sessionId: activePrepared.sessionId || task.sessionId || ''
+          }, { reuseSession: true });
+          activePrepared = refreshed;
+          return refreshed;
+        })().finally(() => {
+          refreshPromise = null;
+        });
       }
+      return refreshPromise;
+    };
 
-      const start = part * chunkSize;
-      const end = Math.min(task.fileSize, start + chunkSize);
-      const chunk = task.file.slice(start, end);
-      let chunkUrl = new URL(activePrepared.uploadUrl);
+    const buildChunkUrl = (currentPrepared, part) => {
+      const chunkUrl = new URL(currentPrepared.uploadUrl);
       chunkUrl.searchParams.set('part', String(part));
       chunkUrl.searchParams.set('totalParts', String(totalParts));
       if (part === totalParts - 1) {
         chunkUrl.searchParams.set('final', '1');
       }
+      return chunkUrl;
+    };
+
+    const sendChunkPart = async (part) => {
+      let currentPrepared = activePrepared;
+      if (shouldRefreshUploadSignature(currentPrepared)) {
+        currentPrepared = await refreshSignedUpload();
+      }
+
+      const { start, end, size } = getChunkBounds(part, chunkSize, task.fileSize);
+      const chunk = task.file.slice(start, end);
+      let chunkUrl = buildChunkUrl(currentPrepared, part);
 
       setStatus(`正在分块上传 ${task.fileName}：${part + 1}/${totalParts} ...`, 'busy');
-      let payload = null;
-      let sent = false;
-      for (let attempt = 0; attempt < 2 && !sent; attempt += 1) {
-        const response = await fetch(chunkUrl.toString(), {
-          method: 'POST',
-          mode: 'cors',
-          headers: task.contentType ? { 'content-type': task.contentType } : undefined,
-          body: chunk
-        });
-        payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
-        if (response.ok) {
-          sent = true;
-          break;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const controller = new AbortController();
+        inFlightControllers.add(controller);
+        let response;
+        try {
+          response = await fetch(chunkUrl.toString(), {
+            method: 'POST',
+            mode: 'cors',
+            headers: task.contentType ? { 'content-type': task.contentType } : undefined,
+            body: chunk,
+            signal: controller.signal
+          });
+        } catch (error) {
+          if (fatalError) {
+            throw fatalError;
+          }
+          throw error;
+        } finally {
+          inFlightControllers.delete(controller);
         }
 
+        const payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
+        if (response.ok) {
+          return { payload, size };
+        }
         const errorMessage = payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`;
         if (attempt === 0 && isExpiredUploadErrorMessage(errorMessage)) {
-          activePrepared = await refreshPreparedUpload(task.id, {
-            ...task,
-            sessionId: activePrepared.sessionId || task.sessionId || ''
-          }, { reuseSession: true });
-          chunkUrl = new URL(activePrepared.uploadUrl);
-          chunkUrl.searchParams.set('part', String(part));
-          chunkUrl.searchParams.set('totalParts', String(totalParts));
-          if (part === totalParts - 1) {
-            chunkUrl.searchParams.set('final', '1');
-          }
+          currentPrepared = await refreshSignedUpload();
+          chunkUrl = buildChunkUrl(currentPrepared, part);
           continue;
         }
         throw new Error(errorMessage);
       }
-      if (!sent) {
-        throw new Error(`MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
-      }
 
-      replaceUploadTask(task.id, {
-        completedParts: part + 1,
-        uploadedBytes: end,
-        progress: Math.min(0.94, end / Math.max(task.fileSize, 1) * 0.94),
-        expiresAt: activePrepared.expiresAt || null
-      });
+      throw new Error(`MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
+    };
 
-      if (payload?.upload) {
-        finalPayload = payload;
+    const uploadWorker = async () => {
+      while (!fatalError) {
+        const queueIndex = nextQueueIndex;
+        if (queueIndex >= pendingParts.length) {
+          return;
+        }
+        nextQueueIndex += 1;
+        const part = pendingParts[queueIndex];
+
+        try {
+          const result = await sendChunkPart(part);
+          if (completedSet.has(part)) {
+            continue;
+          }
+
+          completedSet.add(part);
+          completedBytes += result.size;
+          if (result.payload?.upload) {
+            finalPayload = result.payload;
+          }
+
+          replaceUploadTask(task.id, {
+            completedParts: completedSet.size,
+            completedPartNumbers: [...completedSet].sort((left, right) => left - right),
+            uploadedBytes: completedBytes,
+            progress: Math.min(0.94, completedBytes / Math.max(task.fileSize, 1) * 0.94),
+            expiresAt: activePrepared.expiresAt || null
+          });
+        } catch (error) {
+          if (!fatalError) {
+            fatalError = error instanceof Error ? error : new Error(String(error || 'MTProto 分块上传失败。'));
+            inFlightControllers.forEach((controller) => controller.abort());
+          }
+          return;
+        }
       }
+    };
+
+    if (!pendingParts.length && completedSet.size === totalParts) {
+      const probePart = resumedParts[resumedParts.length - 1] ?? Math.max(0, totalParts - 1);
+      const result = await sendChunkPart(probePart);
+      if (result?.payload?.upload) {
+        finalPayload = result.payload;
+      }
+    }
+
+    await Promise.allSettled(Array.from({
+      length: Math.max(1, Math.min(parallelChunks, pendingParts.length || 1))
+    }, () => uploadWorker()));
+
+    if (fatalError) {
+      throw fatalError;
     }
 
     if (!finalPayload?.upload) {
@@ -819,7 +927,8 @@ export function ensureAdminBus() {
       retryCount,
       progress: resume ? current.progress : 0,
       uploadedBytes: resume ? current.uploadedBytes : 0,
-      completedParts: resume ? current.completedParts : 0
+      completedParts: resume ? current.completedParts : 0,
+      completedPartNumbers: resume ? normalizeCompletedPartNumbers(current.completedPartNumbers, current.totalParts) : []
     }));
 
     try {
@@ -836,7 +945,7 @@ export function ensureAdminBus() {
 
       const bridgePayload = prepared.mode === 'chunked'
         ? await uploadViaMtprotoChunked(prepared, state.uploadTasks.find((item) => item.id === taskId), {
-            startPart: resume ? (state.uploadTasks.find((item) => item.id === taskId)?.completedParts || 0) : 0
+            startPart: 0
           })
         : await uploadViaMtprotoDirect(prepared, state.uploadTasks.find((item) => item.id === taskId));
 
@@ -853,6 +962,7 @@ export function ensureAdminBus() {
         progress: payload?.pending ? 0.99 : 1,
         uploadedBytes: task.fileSize,
         completedParts: Number(prepared.totalParts || 1),
+        completedPartNumbers: [],
         result: payload,
         canRetry: false
       });
