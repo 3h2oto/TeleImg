@@ -1,0 +1,262 @@
+<aside class="admin-utility-dock" data-admin-utility-dock>
+  <div class="admin-utility-dock__panel">
+    <div class="admin-utility-dock__header">
+      <strong>快捷浮岛</strong>
+      <span class="meta-chip" data-role="task-count">上传任务：0</span>
+    </div>
+
+    <div class="admin-utility-dock__actions">
+      <button type="button" class="ghost-button" data-action="go-top">回顶部</button>
+      <button type="button" class="ghost-button" data-action="go-bottom">到底部</button>
+    </div>
+
+    <div class="admin-utility-dock__tasks" data-role="tasks">
+      <div class="empty-state compact">当前没有上传任务。</div>
+    </div>
+  </div>
+</aside>
+
+<script>
+  // @ts-nocheck
+  import { ensureAdminBus, formatBytes } from '../../scripts/admin-bus.js';
+
+  const formatTaskTimeLeft = (expiresAt) => {
+    const value = Number(expiresAt || 0);
+    if (!value) return '签名未记录';
+    const delta = value * 1000 - Date.now();
+    if (delta <= 0) return '签名已过期';
+    const seconds = Math.ceil(delta / 1000);
+    if (seconds < 60) return `${seconds}s 后过期`;
+    const minutes = Math.floor(seconds / 60);
+    const remain = seconds % 60;
+    return `${minutes}m ${remain}s 后过期`;
+  };
+
+  document.querySelectorAll('[data-admin-utility-dock]').forEach((root) => {
+    if (root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const bus = ensureAdminBus();
+    const tasksRoot = root.querySelector('[data-role="tasks"]');
+    const countChip = root.querySelector('[data-role="task-count"]');
+
+    const renderTask = (task) => {
+      const tone = task.status === 'error'
+        ? 'error'
+        : task.status === 'success'
+          ? 'success'
+          : task.status === 'pending'
+            ? 'warning'
+            : 'busy';
+      const percent = Math.max(0, Math.min(100, Math.round(Number(task.progress || 0) * 100)));
+      const resumable = task.mode === 'chunked' && task.completedParts > 0 && task.completedParts < task.totalParts;
+      const summary = task.mode === 'chunked'
+        ? `分块 ${task.completedParts || 0}/${task.totalParts || 0} · ${formatBytes(task.uploadedBytes || 0)} / ${formatBytes(task.fileSize || 0)}`
+        : `${formatBytes(task.uploadedBytes || 0)} / ${formatBytes(task.fileSize || 0)}`;
+
+      return `
+        <article class="upload-task-card" data-tone="${tone}">
+          <div class="upload-task-card__top">
+            <div class="upload-task-card__copy">
+              <strong title="${task.fileName}">${task.fileName}</strong>
+              <span class="muted-text">${task.path}</span>
+            </div>
+            <span class="meta-chip">${task.status}</span>
+          </div>
+          <div class="upload-task-card__meta">
+            <span>${summary}</span>
+            <span>${task.mode || 'direct'}</span>
+            <span>${formatTaskTimeLeft(task.expiresAt)}</span>
+          </div>
+          <div class="upload-task-card__progress">
+            <div class="upload-task-card__bar"><span style="width:${percent}%"></span></div>
+            <span>${percent}%</span>
+          </div>
+          ${task.error ? `<p class="upload-task-card__error">${task.error}</p>` : ''}
+          <div class="upload-task-card__buttons">
+            ${task.canRetry ? `<button type="button" class="ghost-button" data-action="retry-task" data-task-id="${task.id}">${resumable ? '续传 / 重试' : '重试'}</button>` : ''}
+            <button type="button" class="ghost-button" data-action="dismiss-task" data-task-id="${task.id}">关闭</button>
+          </div>
+        </article>
+      `;
+    };
+
+    const render = (state) => {
+      const tasks = bus.getUploadTasks();
+      countChip.textContent = `上传任务：${tasks.length}`;
+      tasksRoot.innerHTML = tasks.length
+        ? tasks.map((task) => renderTask(task)).join('')
+        : '<div class="empty-state compact">当前没有上传任务。</div>';
+    };
+
+    root.addEventListener('click', async (event) => {
+      const target = event.target instanceof Element ? event.target.closest('button[data-action]') : null;
+      if (!target) return;
+
+      const action = target.dataset.action;
+      const taskId = target.dataset.taskId;
+      try {
+        if (action === 'go-top') {
+          bus.scrollToTop();
+          return;
+        }
+
+        if (action === 'go-bottom') {
+          bus.scrollToBottom();
+          return;
+        }
+
+        if (action === 'retry-task' && taskId) {
+          await bus.retryUploadTask(taskId);
+          return;
+        }
+
+        if (action === 'dismiss-task' && taskId) {
+          bus.removeUploadTask(taskId);
+        }
+      } catch (error) {
+        bus.setStatus(error instanceof Error ? error.message : '浮岛操作失败。', 'error');
+      }
+    });
+
+    bus.subscribe(render);
+    void bus.start();
+  });
+</script>
+
+<style>
+  .admin-utility-dock {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 40;
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+  }
+
+  .admin-utility-dock__panel {
+    pointer-events: auto;
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 22px;
+    border: 1px solid rgba(168, 255, 96, 0.14);
+    background: rgba(10, 10, 10, 0.94);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
+    backdrop-filter: blur(12px);
+  }
+
+  .admin-utility-dock__header,
+  .admin-utility-dock__actions,
+  .upload-task-card__top,
+  .upload-task-card__progress,
+  .upload-task-card__buttons {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .admin-utility-dock__actions {
+    justify-content: stretch;
+  }
+
+  .admin-utility-dock__actions .ghost-button {
+    flex: 1;
+  }
+
+  .admin-utility-dock__tasks {
+    display: grid;
+    gap: 10px;
+    max-height: min(48vh, 520px);
+    overflow: auto;
+    padding-right: 4px;
+  }
+
+  .upload-task-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(168, 255, 96, 0.10);
+    background: #0d0d0d;
+  }
+
+  .upload-task-card[data-tone='error'] {
+    border-color: rgba(245, 81, 66, 0.24);
+  }
+
+  .upload-task-card[data-tone='success'] {
+    border-color: rgba(57, 242, 174, 0.22);
+  }
+
+  .upload-task-card[data-tone='warning'] {
+    border-color: rgba(233, 192, 98, 0.24);
+  }
+
+  .upload-task-card__copy {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .upload-task-card__copy strong,
+  .upload-task-card__copy span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .upload-task-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.84rem;
+  }
+
+  .upload-task-card__bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(168, 255, 96, 0.08);
+  }
+
+  .upload-task-card__bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  }
+
+  .upload-task-card__error {
+    margin: 0;
+    color: var(--danger);
+    font-size: 0.88rem;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  .upload-task-card__buttons {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .empty-state.compact {
+    padding: 14px;
+    border-radius: 16px;
+    background: #0d0d0d;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    text-align: center;
+  }
+
+  @media (max-width: 900px) {
+    .admin-utility-dock {
+      right: 12px;
+      left: 12px;
+      width: auto;
+      bottom: 12px;
+    }
+  }
+</style>

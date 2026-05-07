@@ -63,6 +63,9 @@ async function prepareUpload(context, config) {
   const fileName = sanitizeRequestedFileName(url.searchParams.get('name'));
   const fileSize = parseSize(url.searchParams.get('size'));
   const contentType = sanitizeContentType(url.searchParams.get('type'));
+  const requestedSessionId = typeof url.searchParams.get('session') === 'string'
+    ? url.searchParams.get('session').trim()
+    : '';
   if (!fileSize) {
     return json({ error: 'A positive file size is required.' }, { status: 400 });
   }
@@ -87,15 +90,18 @@ async function prepareUpload(context, config) {
     fileName,
     fileSize,
     contentType,
-    sessionId: chunked ? crypto.randomUUID() : '',
+    sessionId: chunked ? (requestedSessionId || crypto.randomUUID()) : '',
     totalParts,
     chunked
   });
+  const uploadParams = new URL(uploadUrl);
 
   return json({
     success: true,
     mode: chunked ? 'chunked' : 'direct',
     uploadUrl,
+    sessionId: chunked ? (uploadParams.searchParams.get('session') || '') : '',
+    expiresAt: Number.parseInt(uploadParams.searchParams.get('expires') || '0', 10) || null,
     fileName,
     fileSize,
     folderPath,

@@ -2,15 +2,19 @@
 import AdminLeftPanel from './admin/AdminLeftPanel.astro';
 import AdminCenterPanel from './admin/AdminCenterPanel.astro';
 import AdminRightPanel from './admin/AdminRightPanel.astro';
+import AdminUtilityDock from './admin/AdminUtilityDock.astro';
 ---
 
-<section class="admin-shell admin-workspace-shell">
-  <div class="admin-layout-grid">
-    <AdminLeftPanel />
-    <AdminCenterPanel />
-    <AdminRightPanel />
-  </div>
-</section>
+<>
+  <section class="admin-shell admin-workspace-shell">
+    <div class="admin-layout-grid">
+      <AdminLeftPanel />
+      <AdminCenterPanel />
+      <AdminRightPanel />
+    </div>
+  </section>
+  <AdminUtilityDock />
+</>
 
 <style>
   .admin-workspace-shell {

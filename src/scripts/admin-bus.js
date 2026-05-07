@@ -132,6 +132,32 @@ function ensureExpandedAncestors(state, path) {
   }
 }
 
+function createUploadTask(file, currentPath) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    file,
+    fileName: file.name,
+    fileSize: Number(file.size || 0),
+    contentType: file.type || 'application/octet-stream',
+    path: currentPath,
+    mode: null,
+    sessionId: '',
+    status: 'queued',
+    phase: 'queued',
+    progress: 0,
+    uploadedBytes: 0,
+    completedParts: 0,
+    totalParts: 1,
+    retryCount: 0,
+    error: '',
+    result: null,
+    canRetry: false,
+    expiresAt: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
 export function ensureAdminBus() {
   if (typeof window === 'undefined') {
     return null;
@@ -151,6 +177,7 @@ export function ensureAdminBus() {
     expandedFolders: new Set(['/']),
     selectedKey: null,
     telegramStatus: null,
+    uploadTasks: [],
     statusMessage: '正在加载...',
     statusTone: 'busy'
   };
@@ -166,6 +193,42 @@ export function ensureAdminBus() {
     state.statusMessage = message;
     state.statusTone = tone;
     notify();
+  };
+
+  const getUploadTasks = () => [...state.uploadTasks].sort((left, right) => right.updatedAt - left.updatedAt);
+
+  const replaceUploadTask = (taskId, updater) => {
+    const index = state.uploadTasks.findIndex((task) => task.id === taskId);
+    if (index < 0) {
+      return null;
+    }
+
+    const current = state.uploadTasks[index];
+    const next = {
+      ...current,
+      ...(typeof updater === 'function' ? updater(current) : updater),
+      updatedAt: Date.now()
+    };
+    state.uploadTasks.splice(index, 1, next);
+    notify();
+    return next;
+  };
+
+  const appendUploadTask = (task) => {
+    state.uploadTasks.unshift(task);
+    if (state.uploadTasks.length > 12) {
+      state.uploadTasks.length = 12;
+    }
+    notify();
+    return task;
+  };
+
+  const removeUploadTask = (taskId) => {
+    const index = state.uploadTasks.findIndex((task) => task.id === taskId);
+    if (index >= 0) {
+      state.uploadTasks.splice(index, 1);
+      notify();
+    }
   };
 
   const getFilteredItems = () => state.currentItems.filter((item) => matchesSearch(item, state.search));
@@ -494,12 +557,35 @@ export function ensureAdminBus() {
     }
   };
 
-  const uploadViaMtprotoDirect = async (prepared, file) => {
+  const prepareMtprotoUpload = async (task, { reuseSession = false } = {}) => {
+    const query = new URLSearchParams({
+      path: task.path,
+      name: task.fileName,
+      size: String(task.fileSize),
+      type: task.contentType
+    });
+    if (reuseSession && task.sessionId) {
+      query.set('session', task.sessionId);
+    }
+
+    const prepareResponse = await fetch(`/api/manage/mtproto/upload?${query.toString()}`, {
+      headers: {
+        accept: 'application/json'
+      }
+    });
+    const prepared = await parseResponsePayload(prepareResponse, '无法解析 MTProto 上传预签名返回。');
+    if (!prepareResponse.ok) {
+      throw new Error(prepared?.error || 'MTProto 上传准备失败。');
+    }
+    return prepared;
+  };
+
+  const uploadViaMtprotoDirect = async (prepared, task) => {
     const response = await fetch(prepared.uploadUrl, {
       method: 'POST',
       mode: 'cors',
-      headers: file.type ? { 'content-type': file.type } : undefined,
-      body: file
+      headers: task.contentType ? { 'content-type': task.contentType } : undefined,
+      body: task.file
     });
 
     const payload = await parseResponsePayload(response, '无法解析 MTProto bridge 上传返回。');
@@ -507,22 +593,37 @@ export function ensureAdminBus() {
       throw new Error(payload?.error || 'MTProto bridge 直传失败。');
     }
 
+    replaceUploadTask(task.id, {
+      uploadedBytes: task.fileSize,
+      progress: 0.96,
+      phase: 'finalizing'
+    });
+
     return payload;
   };
 
-  const uploadViaMtprotoChunked = async (prepared, file) => {
+  const uploadViaMtprotoChunked = async (prepared, task, { startPart = 0 } = {}) => {
     const chunkSize = Number(prepared.chunkSize || 0);
     if (!Number.isFinite(chunkSize) || chunkSize <= 0) {
       throw new Error('分块上传参数无效。');
     }
 
-    const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(file.size / chunkSize)));
+    const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(task.fileSize / chunkSize)));
     let finalPayload = null;
+    replaceUploadTask(task.id, {
+      mode: 'chunked',
+      totalParts,
+      sessionId: prepared.sessionId || task.sessionId || '',
+      expiresAt: prepared.expiresAt || null,
+      phase: 'uploading',
+      status: 'uploading',
+      canRetry: false
+    });
 
-    for (let part = 0; part < totalParts; part += 1) {
+    for (let part = startPart; part < totalParts; part += 1) {
       const start = part * chunkSize;
-      const end = Math.min(file.size, start + chunkSize);
-      const chunk = file.slice(start, end);
+      const end = Math.min(task.fileSize, start + chunkSize);
+      const chunk = task.file.slice(start, end);
       const chunkUrl = new URL(prepared.uploadUrl);
       chunkUrl.searchParams.set('part', String(part));
       chunkUrl.searchParams.set('totalParts', String(totalParts));
@@ -530,17 +631,24 @@ export function ensureAdminBus() {
         chunkUrl.searchParams.set('final', '1');
       }
 
-      setStatus(`正在分块上传 ${file.name}：${part + 1}/${totalParts} ...`, 'busy');
+      setStatus(`正在分块上传 ${task.fileName}：${part + 1}/${totalParts} ...`, 'busy');
       const response = await fetch(chunkUrl.toString(), {
         method: 'POST',
         mode: 'cors',
-        headers: file.type ? { 'content-type': file.type } : undefined,
+        headers: task.contentType ? { 'content-type': task.contentType } : undefined,
         body: chunk
       });
       const payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
       if (!response.ok) {
         throw new Error(payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
       }
+
+      replaceUploadTask(task.id, {
+        completedParts: part + 1,
+        uploadedBytes: end,
+        progress: Math.min(0.94, end / Math.max(task.fileSize, 1) * 0.94),
+        expiresAt: prepared.expiresAt || null
+      });
 
       if (payload?.upload) {
         finalPayload = payload;
@@ -554,38 +662,16 @@ export function ensureAdminBus() {
     return finalPayload;
   };
 
-  const uploadViaMtproto = async (fileList) => {
-    const files = Array.from(fileList || []).filter((file) => file instanceof File);
-    if (!files.length) {
-      return { uploaded: 0, files: [] };
-    }
-
-    const results = [];
-    for (const [index, file] of files.entries()) {
-      setStatus(`正在通过 MTProto 上传 ${index + 1}/${files.length}：${file.name} ...`, 'busy');
-      const prepareResponse = await fetch(`/api/manage/mtproto/upload?path=${encodeURIComponent(state.currentPath)}&name=${encodeURIComponent(file.name)}&size=${encodeURIComponent(file.size)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}`, {
-        headers: {
-          accept: 'application/json'
-        }
-      });
-      const prepared = await parseResponsePayload(prepareResponse, '无法解析 MTProto 上传预签名返回。');
-      if (!prepareResponse.ok) {
-        throw new Error(prepared?.error || 'MTProto 上传准备失败。');
-      }
-
-      const bridgePayload = prepared.mode === 'chunked'
-        ? await uploadViaMtprotoChunked(prepared, file)
-        : await uploadViaMtprotoDirect(prepared, file);
-
+  const finalizeMtprotoUpload = async (task, bridgePayload) => {
       const finalizeResponse = await fetch('/api/manage/mtproto/upload', {
         method: 'POST',
         headers: {
           'content-type': 'application/json'
         },
         body: JSON.stringify({
-          path: state.currentPath,
-          fileName: file.name,
-          contentType: file.type || 'application/octet-stream',
+          path: task.path,
+          fileName: task.fileName,
+          contentType: task.contentType,
           upload: bridgePayload.upload
         })
       });
@@ -593,33 +679,134 @@ export function ensureAdminBus() {
       if (!finalizeResponse.ok) {
         throw new Error(payload?.error || 'MTProto 上传收尾失败。');
       }
+      return payload;
+  };
 
-      results.push(payload);
-      state.folderCache.delete(state.currentPath);
-      const parentPath = getParentPath(state.currentPath);
-      if (parentPath) {
-        state.folderCache.delete(parentPath);
-      }
-      await openFolder(state.currentPath, { force: true, silent: true });
+  const refreshFolderAfterUpload = async (task) => {
+    state.folderCache.delete(task.path);
+    const parentPath = getParentPath(task.path);
+    if (parentPath) {
+      state.folderCache.delete(parentPath);
+    }
+    await openFolder(task.path, { force: true, silent: true });
+  };
 
-      if (payload?.pending) {
-        setStatus(`已提交 ${file.name} 到 Telegram，等待 webhook 收录到 ${state.currentPath} ...`, 'busy');
-      } else {
-        setStatus(`MTProto 上传完成：${file.name}`, 'success');
-      }
+  const runUploadTask = async (taskId, { resume = false } = {}) => {
+    const task = state.uploadTasks.find((item) => item.id === taskId);
+    if (!task) {
+      throw new Error('上传任务不存在。');
     }
 
-    const hasPending = results.some((item) => item?.pending);
-    if (hasPending) {
-      window.setTimeout(() => {
-        void refreshCurrentFolder().catch(() => {});
-      }, 2500);
+    const retryCount = resume ? task.retryCount + 1 : task.retryCount;
+    replaceUploadTask(taskId, (current) => ({
+      status: 'preparing',
+      phase: 'preparing',
+      error: '',
+      canRetry: false,
+      retryCount,
+      progress: resume ? current.progress : 0,
+      uploadedBytes: resume ? current.uploadedBytes : 0,
+      completedParts: resume ? current.completedParts : 0
+    }));
+
+    try {
+      setStatus(`正在通过 MTProto 上传：${task.fileName} ...`, 'busy');
+      const prepared = await prepareMtprotoUpload(task, { reuseSession: resume && task.mode === 'chunked' && Boolean(task.sessionId) });
+      replaceUploadTask(taskId, {
+        mode: prepared.mode,
+        sessionId: prepared.sessionId || task.sessionId || '',
+        totalParts: Number(prepared.totalParts || 1),
+        expiresAt: prepared.expiresAt || null,
+        status: 'uploading',
+        phase: 'uploading'
+      });
+
+      const bridgePayload = prepared.mode === 'chunked'
+        ? await uploadViaMtprotoChunked(prepared, state.uploadTasks.find((item) => item.id === taskId), {
+            startPart: resume ? (state.uploadTasks.find((item) => item.id === taskId)?.completedParts || 0) : 0
+          })
+        : await uploadViaMtprotoDirect(prepared, state.uploadTasks.find((item) => item.id === taskId));
+
+      replaceUploadTask(taskId, {
+        status: 'finalizing',
+        phase: 'finalizing',
+        progress: 0.97
+      });
+      const payload = await finalizeMtprotoUpload(state.uploadTasks.find((item) => item.id === taskId), bridgePayload);
+
+      replaceUploadTask(taskId, {
+        status: payload?.pending ? 'pending' : 'success',
+        phase: payload?.pending ? 'pending' : 'success',
+        progress: payload?.pending ? 0.99 : 1,
+        uploadedBytes: task.fileSize,
+        completedParts: Number(prepared.totalParts || 1),
+        result: payload,
+        canRetry: false
+      });
+
+      await refreshFolderAfterUpload(state.uploadTasks.find((item) => item.id === taskId));
+
+      if (payload?.pending) {
+        setStatus(`已提交 ${task.fileName} 到 Telegram，等待 webhook 收录到 ${task.path} ...`, 'busy');
+        window.setTimeout(() => {
+          void refreshCurrentFolder().catch(() => {});
+        }, 2500);
+      } else {
+        setStatus(`MTProto 上传完成：${task.fileName}`, 'success');
+      }
+
+      return payload;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'MTProto 上传失败。';
+      replaceUploadTask(taskId, (current) => ({
+        status: 'error',
+        phase: 'error',
+        error: message,
+        canRetry: true,
+        expiresAt: /expired/i.test(message) ? Date.now() - 1 : current.expiresAt
+      }));
+      setStatus(message, 'error');
+      throw error;
+    }
+  };
+
+  const uploadViaMtproto = async (fileList) => {
+    const files = Array.from(fileList || []).filter((file) => file instanceof File);
+    if (!files.length) {
+      return { uploaded: 0, files: [] };
+    }
+
+    const results = [];
+    for (const file of files) {
+      const task = appendUploadTask(createUploadTask(file, state.currentPath));
+      const result = await runUploadTask(task.id).catch((error) => ({
+        error: error instanceof Error ? error.message : 'MTProto 上传失败。'
+      }));
+      results.push(result);
     }
 
     return {
-      uploaded: results.length,
+      uploaded: results.filter((item) => !item?.error).length,
       files: results
     };
+  };
+
+  const retryUploadTask = async (taskId) => {
+    const task = state.uploadTasks.find((item) => item.id === taskId);
+    if (!task) {
+      throw new Error('上传任务不存在。');
+    }
+
+    const resumable = task.mode === 'chunked' && task.sessionId && task.completedParts > 0 && task.completedParts < task.totalParts;
+    return runUploadTask(taskId, { resume: Boolean(resumable) });
+  };
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
   };
 
   const openSelectedItem = () => {
@@ -660,6 +847,11 @@ export function ensureAdminBus() {
     triggerTelegramAction,
     copyFileUrl,
     uploadViaMtproto,
+    retryUploadTask,
+    removeUploadTask,
+    getUploadTasks,
+    scrollToTop,
+    scrollToBottom,
     selectItem,
     getFilteredItems,
     getSelectedItem,
