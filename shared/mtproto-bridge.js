@@ -2,7 +2,7 @@ const BRIDGE_ROUTE_PATH = '/telegram/file';
 const BRIDGE_UPLOAD_ROUTE_PATH = '/telegram/upload';
 const BRIDGE_CHUNK_UPLOAD_ROUTE_PATH = '/telegram/upload/chunk';
 const DEFAULT_TTL_SECONDS = 300;
-const DEFAULT_UPLOAD_TTL_SECONDS = 60 * 60;
+const DEFAULT_UPLOAD_TTL_SECONDS = 3 * 60 * 60;
 const encoder = new TextEncoder();
 
 function clean(value, fallback = '') {
