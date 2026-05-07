@@ -125,7 +125,7 @@
     padding-right: 4px;
   }
 
-  .favorite-card {
+  :global(.favorite-card) {
     display: grid;
     gap: 8px;
     padding: 12px;
@@ -134,14 +134,14 @@
     background: #0d0d0d;
   }
 
-  .favorite-card__row {
+  :global(.favorite-card__row) {
     display: grid;
     grid-template-columns: 68px minmax(0, 1fr);
     gap: 10px;
     align-items: center;
   }
 
-  .favorite-card__preview {
+  :global(.favorite-card__preview) {
     width: 68px;
     height: 68px;
     border-radius: 14px;
@@ -152,39 +152,39 @@
     place-items: center;
   }
 
-  .favorite-card__preview img,
-  .favorite-card__preview video {
+  :global(.favorite-card__preview img),
+  :global(.favorite-card__preview video) {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
   }
 
-  .favorite-card__audio {
+  :global(.favorite-card__audio) {
     font-size: 1.5rem;
   }
 
-  .favorite-card__copy {
+  :global(.favorite-card__copy) {
     display: grid;
     gap: 4px;
     min-width: 0;
   }
 
-  .favorite-card__copy strong,
-  .favorite-card__copy span {
+  :global(.favorite-card__copy strong),
+  :global(.favorite-card__copy span) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .favorite-card__buttons {
+  :global(.favorite-card__buttons) {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     justify-content: flex-end;
   }
 
-  .empty-state.compact {
+  :global(.admin-favorites-dock__list .empty-state.compact) {
     padding: 14px;
     border-radius: 16px;
     background: #0d0d0d;
