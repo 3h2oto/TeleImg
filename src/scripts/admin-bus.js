@@ -158,6 +158,28 @@ function createUploadTask(file, currentPath) {
   };
 }
 
+const UPLOAD_URL_REFRESH_WINDOW_MS = 45 * 1000;
+
+function uploadExpiresAtMs(taskOrPrepared) {
+  const expiresAt = Number(taskOrPrepared?.expiresAt || 0);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return 0;
+  }
+  return expiresAt * 1000;
+}
+
+function shouldRefreshUploadSignature(taskOrPrepared) {
+  const expiresAt = uploadExpiresAtMs(taskOrPrepared);
+  if (!expiresAt) {
+    return false;
+  }
+  return (expiresAt - Date.now()) <= UPLOAD_URL_REFRESH_WINDOW_MS;
+}
+
+function isExpiredUploadErrorMessage(message) {
+  return /signed upload url has expired/i.test(String(message || ''));
+}
+
 export function ensureAdminBus() {
   if (typeof window === 'undefined') {
     return null;
@@ -581,25 +603,41 @@ export function ensureAdminBus() {
   };
 
   const uploadViaMtprotoDirect = async (prepared, task) => {
-    const response = await fetch(prepared.uploadUrl, {
-      method: 'POST',
-      mode: 'cors',
-      headers: task.contentType ? { 'content-type': task.contentType } : undefined,
-      body: task.file
-    });
+    let activePrepared = prepared;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (attempt > 0 || shouldRefreshUploadSignature(activePrepared)) {
+        activePrepared = await prepareMtprotoUpload(task, { reuseSession: false });
+        replaceUploadTask(task.id, {
+          expiresAt: activePrepared.expiresAt || null
+        });
+      }
 
-    const payload = await parseResponsePayload(response, '无法解析 MTProto bridge 上传返回。');
-    if (!response.ok) {
-      throw new Error(payload?.error || 'MTProto bridge 直传失败。');
+      const response = await fetch(activePrepared.uploadUrl, {
+        method: 'POST',
+        mode: 'cors',
+        headers: task.contentType ? { 'content-type': task.contentType } : undefined,
+        body: task.file
+      });
+
+      const payload = await parseResponsePayload(response, '无法解析 MTProto bridge 上传返回。');
+      if (response.ok) {
+        replaceUploadTask(task.id, {
+          uploadedBytes: task.fileSize,
+          progress: 0.96,
+          phase: 'finalizing',
+          expiresAt: activePrepared.expiresAt || null
+        });
+        return payload;
+      }
+
+      const errorMessage = payload?.error || 'MTProto bridge 直传失败。';
+      if (attempt === 0 && isExpiredUploadErrorMessage(errorMessage)) {
+        continue;
+      }
+      throw new Error(errorMessage);
     }
 
-    replaceUploadTask(task.id, {
-      uploadedBytes: task.fileSize,
-      progress: 0.96,
-      phase: 'finalizing'
-    });
-
-    return payload;
+    throw new Error('MTProto bridge 直传失败。');
   };
 
   const uploadViaMtprotoChunked = async (prepared, task, { startPart = 0 } = {}) => {
@@ -610,6 +648,7 @@ export function ensureAdminBus() {
 
     const totalParts = Number(prepared.totalParts || Math.max(1, Math.ceil(task.fileSize / chunkSize)));
     let finalPayload = null;
+    let activePrepared = prepared;
     replaceUploadTask(task.id, {
       mode: 'chunked',
       totalParts,
@@ -621,10 +660,21 @@ export function ensureAdminBus() {
     });
 
     for (let part = startPart; part < totalParts; part += 1) {
+      if (shouldRefreshUploadSignature(activePrepared)) {
+        activePrepared = await prepareMtprotoUpload({
+          ...task,
+          sessionId: activePrepared.sessionId || task.sessionId || ''
+        }, { reuseSession: true });
+        replaceUploadTask(task.id, {
+          sessionId: activePrepared.sessionId || task.sessionId || '',
+          expiresAt: activePrepared.expiresAt || null
+        });
+      }
+
       const start = part * chunkSize;
       const end = Math.min(task.fileSize, start + chunkSize);
       const chunk = task.file.slice(start, end);
-      const chunkUrl = new URL(prepared.uploadUrl);
+      let chunkUrl = new URL(activePrepared.uploadUrl);
       chunkUrl.searchParams.set('part', String(part));
       chunkUrl.searchParams.set('totalParts', String(totalParts));
       if (part === totalParts - 1) {
@@ -632,22 +682,50 @@ export function ensureAdminBus() {
       }
 
       setStatus(`正在分块上传 ${task.fileName}：${part + 1}/${totalParts} ...`, 'busy');
-      const response = await fetch(chunkUrl.toString(), {
-        method: 'POST',
-        mode: 'cors',
-        headers: task.contentType ? { 'content-type': task.contentType } : undefined,
-        body: chunk
-      });
-      const payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
-      if (!response.ok) {
-        throw new Error(payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
+      let payload = null;
+      let sent = false;
+      for (let attempt = 0; attempt < 2 && !sent; attempt += 1) {
+        const response = await fetch(chunkUrl.toString(), {
+          method: 'POST',
+          mode: 'cors',
+          headers: task.contentType ? { 'content-type': task.contentType } : undefined,
+          body: chunk
+        });
+        payload = await parseResponsePayload(response, '无法解析 MTProto 分块上传返回。');
+        if (response.ok) {
+          sent = true;
+          break;
+        }
+
+        const errorMessage = payload?.error || `MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`;
+        if (attempt === 0 && isExpiredUploadErrorMessage(errorMessage)) {
+          activePrepared = await prepareMtprotoUpload({
+            ...task,
+            sessionId: activePrepared.sessionId || task.sessionId || ''
+          }, { reuseSession: true });
+          replaceUploadTask(task.id, {
+            sessionId: activePrepared.sessionId || task.sessionId || '',
+            expiresAt: activePrepared.expiresAt || null
+          });
+          chunkUrl = new URL(activePrepared.uploadUrl);
+          chunkUrl.searchParams.set('part', String(part));
+          chunkUrl.searchParams.set('totalParts', String(totalParts));
+          if (part === totalParts - 1) {
+            chunkUrl.searchParams.set('final', '1');
+          }
+          continue;
+        }
+        throw new Error(errorMessage);
+      }
+      if (!sent) {
+        throw new Error(`MTProto 分块上传失败（part ${part + 1}/${totalParts}）。`);
       }
 
       replaceUploadTask(task.id, {
         completedParts: part + 1,
         uploadedBytes: end,
         progress: Math.min(0.94, end / Math.max(task.fileSize, 1) * 0.94),
-        expiresAt: prepared.expiresAt || null
+        expiresAt: activePrepared.expiresAt || null
       });
 
       if (payload?.upload) {

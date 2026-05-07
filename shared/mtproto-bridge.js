@@ -2,6 +2,7 @@ const BRIDGE_ROUTE_PATH = '/telegram/file';
 const BRIDGE_UPLOAD_ROUTE_PATH = '/telegram/upload';
 const BRIDGE_CHUNK_UPLOAD_ROUTE_PATH = '/telegram/upload/chunk';
 const DEFAULT_TTL_SECONDS = 300;
+const DEFAULT_UPLOAD_TTL_SECONDS = 60 * 60;
 const encoder = new TextEncoder();
 
 function clean(value, fallback = '') {
@@ -142,7 +143,7 @@ export function buildMtprotoBridgeUploadPayload({
   contentType = '',
   sessionId = '',
   totalParts = '',
-  expiresAt = Date.now() + DEFAULT_TTL_SECONDS * 1000
+  expiresAt = Date.now() + DEFAULT_UPLOAD_TTL_SECONDS * 1000
 }) {
   const safeChatId = clean(chatId);
   const safeSize = Number.parseInt(clean(fileSize), 10);
@@ -238,4 +239,8 @@ export function getMtprotoBridgeUploadRoutePath() {
 
 export function getMtprotoBridgeChunkUploadRoutePath() {
   return BRIDGE_CHUNK_UPLOAD_ROUTE_PATH;
+}
+
+export function getMtprotoBridgeUploadTtlSeconds() {
+  return DEFAULT_UPLOAD_TTL_SECONDS;
 }
