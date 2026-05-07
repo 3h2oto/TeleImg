@@ -1,4 +1,4 @@
-import { getRecord, normalizeMetadata } from '../_lib/kv.js';
+import { getRecord } from '../_lib/kv.js';
 import { buildMtprotoBridgeRedirect, isTelegramLargeFileError } from '../_lib/mtproto-bridge.js';
 import { buildLegacyTelegraphUrl, getTelegramFileId, isTelegramFileKey, lookupTelegramFile } from '../_lib/telegram.js';
 import { redirect, serviceUnavailable, text } from '../_lib/http.js';
@@ -20,10 +20,6 @@ function isAdminPreview(request) {
   } catch {
     return false;
   }
-}
-
-function isWhitelistModeEnabled(config) {
-  return String(config.WhiteList_Mode).toLowerCase() === 'true';
 }
 
 function copyForwardHeaders(request) {
@@ -93,7 +89,7 @@ function telegramFailureResponse(key, resolution) {
   });
 }
 
-async function moderateLegacyAsset(config, env, requestUrl, key, metadata) {
+async function moderateLegacyAsset(config, env, key, metadata) {
   if (!config.ModerateContentApiKey || isTelegramFileKey(key) || metadata.Label !== 'None') {
     return metadata;
   }
@@ -116,10 +112,6 @@ async function moderateLegacyAsset(config, env, requestUrl, key, metadata) {
 
   await env.img_url.put(key, '', { metadata: next });
 
-  if (payload.rating_label === 'adult') {
-    throw redirect(`${requestUrl.origin}/block-img`);
-  }
-
   return next;
 }
 
@@ -131,29 +123,10 @@ export async function onRequest(context) {
   const adminPreview = isAdminPreview(request);
   const record = env.img_url ? await getRecord(env, key) : null;
   let metadata = record?.metadata || null;
-  const effectiveMetadata = metadata || normalizeMetadata(key, {});
 
   if (!adminPreview) {
-    if (effectiveMetadata.ListType === 'Block' || effectiveMetadata.Label === 'adult') {
-      return redirect(`${url.origin}/block-img`);
-    }
-
-    const isWhiteListed = effectiveMetadata.ListType === 'White';
-    if (!isWhiteListed && isWhitelistModeEnabled(config)) {
-      return redirect(`${url.origin}/whitelist-on`);
-    }
-
-    if (!isWhiteListed && metadata) {
-      try {
-        metadata = await moderateLegacyAsset(config, env, url, key, metadata);
-      } catch (response) {
-        if (response instanceof Response) {
-          return response;
-        }
-        throw response;
-      }
-
-      await env.img_url.put(key, '', { metadata });
+    if (metadata) {
+      metadata = await moderateLegacyAsset(config, env, key, metadata);
     }
   }
 

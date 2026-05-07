@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('/file/[id]', () => {
-  it('redirects blocked records', async () => {
+  it('no longer redirects blocked records', async () => {
     const env = {
       img_url: createKv({
         'blocked.png': { ListType: 'Block', fileName: 'blocked.png', TimeStamp: 1 }
@@ -36,11 +36,11 @@ describe('/file/[id]', () => {
       request: new Request('https://teleimg.example/file/blocked.png')
     });
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toBe('https://teleimg.example/block-img');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('payload');
   });
 
-  it('redirects to whitelist page when whitelist mode is on', async () => {
+  it('no longer redirects when legacy whitelist mode is present', async () => {
     const env = {
       WhiteList_Mode: 'true',
       img_url: createKv({
@@ -54,8 +54,8 @@ describe('/file/[id]', () => {
       request: new Request('https://teleimg.example/file/pending.png')
     });
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toBe('https://teleimg.example/whitelist-on');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('payload');
   });
 
   it('bypasses moderation rules for admin preview requests', async () => {
@@ -74,6 +74,41 @@ describe('/file/[id]', () => {
     const response = await onRequest({ env, params: { id: 'blocked.png' }, request });
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('payload');
+  });
+
+  it('keeps adult moderation labels as metadata instead of redirecting to a legacy block page', async () => {
+    global.fetch = vi.fn(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.startsWith('https://api.moderatecontent.com/moderate/')) {
+        return new Response(JSON.stringify({ rating_label: 'adult' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+
+      return new Response('payload', {
+        status: 200,
+        headers: { 'content-type': 'image/png' }
+      });
+    });
+
+    const env = {
+      ModerateContentApiKey: 'key',
+      img_url: createKv({
+        'legacy.png': { fileName: 'legacy.png', Label: 'None', TimeStamp: 1 }
+      })
+    };
+
+    const response = await onRequest({
+      env,
+      params: { id: 'legacy.png' },
+      request: new Request('https://teleimg.example/file/legacy.png')
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('payload');
+    const stored = await env.img_url.getWithMetadata('legacy.png');
+    expect(stored.metadata.Label).toBe('adult');
   });
 
   it('surfaces Telegram large-file errors instead of pretending the file is missing', async () => {

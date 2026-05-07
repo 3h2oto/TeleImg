@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "dev:pages": "npm run build && wrangler pages dev dist --kv img_url --binding BASIC_USER=admin --binding BASIC_PASS=123 --binding WhiteList_Mode=false --persist-to ./.wrangler/state",
+    "dev:pages": "npm run build && wrangler pages dev dist --kv img_url --binding BASIC_USER=admin --binding BASIC_PASS=123 --persist-to ./.wrangler/state",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",

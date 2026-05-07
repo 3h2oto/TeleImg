@@ -13,7 +13,7 @@
 
 <script>
   // @ts-nocheck
-  import { ensureAdminBus, formatBytes, formatTime } from '../../scripts/admin-bus.js';
+  import { ensureAdminBus, formatBytes, formatTime, isAudio, isVideo } from '../../scripts/admin-bus.js';
 
   document.querySelectorAll('[data-admin-favorites-dock]').forEach((root) => {
     if (root.dataset.bound === 'true') return;
@@ -23,12 +23,27 @@
     const countChip = root.querySelector('[data-role="favorite-count"]');
     const listRoot = root.querySelector('[data-role="favorite-list"]');
 
+    const renderPreview = (item) => {
+      if (isVideo(item.name)) {
+        return `<video muted playsinline preload="metadata" src="${item.url}"></video>`;
+      }
+
+      if (isAudio(item.name)) {
+        return `<div class="favorite-card__audio">🎵</div>`;
+      }
+
+      return `<img loading="lazy" src="${item.url}" alt="${item.metadata?.fileName || item.name}" />`;
+    };
+
     const renderItem = (item) => `
       <article class="favorite-card">
-        <div class="favorite-card__copy">
-          <strong title="${item.metadata?.fileName || item.name}">${item.metadata?.fileName || item.name}</strong>
-          <span class="muted-text" title="${item.folderPath || '/'}">${item.folderPath || '/'}</span>
-          <span class="muted-text">${formatBytes(item.metadata?.fileSize)} · ${formatTime(item.metadata?.TimeStamp)}</span>
+        <div class="favorite-card__row">
+          <div class="favorite-card__preview">${renderPreview(item)}</div>
+          <div class="favorite-card__copy">
+            <strong title="${item.metadata?.fileName || item.name}">${item.metadata?.fileName || item.name}</strong>
+            <span class="muted-text" title="${item.folderPath || '/'}">${item.folderPath || '/'}</span>
+            <span class="muted-text">${formatBytes(item.metadata?.fileSize)} · ${formatTime(item.metadata?.TimeStamp)}</span>
+          </div>
         </div>
         <div class="favorite-card__buttons">
           <button type="button" class="ghost-button" data-action="jump-favorite" data-key="${item.name}">跳转</button>
@@ -117,6 +132,36 @@
     border-radius: 18px;
     border: 1px solid rgba(168, 255, 96, 0.10);
     background: #0d0d0d;
+  }
+
+  .favorite-card__row {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+  }
+
+  .favorite-card__preview {
+    width: 68px;
+    height: 68px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(168, 255, 96, 0.08);
+    background: #090909;
+    display: grid;
+    place-items: center;
+  }
+
+  .favorite-card__preview img,
+  .favorite-card__preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .favorite-card__audio {
+    font-size: 1.5rem;
   }
 
   .favorite-card__copy {

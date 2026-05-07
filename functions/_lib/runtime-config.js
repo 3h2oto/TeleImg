@@ -10,7 +10,6 @@ const RUNTIME_KEYS = [
   'TG_MT_BRIDGE_URL',
   'TG_MT_BRIDGE_SECRET',
   'PUBLIC_BASE_URL',
-  'WhiteList_Mode',
   'ModerateContentApiKey'
 ];
 
