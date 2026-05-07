@@ -100,13 +100,13 @@ if (!commitHash) {
         ['最近 webhook', telegram?.syncState?.lastWebhookAt ? formatTime(telegram.syncState.lastWebhookAt) : '无'],
         ['最近 sync', telegram?.syncState?.lastSyncAt ? formatTime(telegram.syncState.lastSyncAt) : '无'],
         ['桥接状态', !bridge?.configured ? '未配置' : (bridge.ok ? '在线' : '异常')],
-        ['后端', bridge.backend === 'workers-free' ? 'Workers Free' : '外置桥接'],
-        ['域名', bridge.host || '未知'],
-        ['桥连接', health.connected === undefined ? '未知' : (health.connected ? '已连' : '未连')],
-        ['桥授权', health.authorized === undefined ? '未知' : (health.authorized ? '已授权' : '未授权')],
-        ['最近下载', health.lastDownloadAt ? formatTime(health.lastDownloadAt) : '无'],
-        ['错误', bridge.error || health.lastError || '无']
-      ];
+        bridge?.configured ? ['后端', bridge.backend === 'workers-free' ? 'Workers Free' : '外置桥接'] : null,
+        bridge?.configured ? ['域名', bridge.host || '未知'] : null,
+        bridge?.configured ? ['桥连接', health.connected === undefined ? '未知' : (health.connected ? '已连' : '未连')] : null,
+        bridge?.configured ? ['桥授权', health.authorized === undefined ? '未知' : (health.authorized ? '已授权' : '未授权')] : null,
+        bridge?.configured ? ['最近下载', health.lastDownloadAt ? formatTime(health.lastDownloadAt) : '无'] : null,
+        bridge?.configured ? ['错误', bridge.error || health.lastError || '无'] : null
+      ].filter(Boolean);
 
       bridgePanel.innerHTML = `
         <div class="bridge-panel__header">
@@ -131,8 +131,10 @@ if (!commitHash) {
       renderBridgePanel(bridge);
     };
 
-    bus.subscribe(render);
-    void bus.start();
+    toggleButton?.addEventListener('click', () => {
+      collapsed = !collapsed;
+      applyCollapsedState();
+    });
 
     root.addEventListener('click', async (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -141,8 +143,6 @@ if (!commitHash) {
 
       const action = button.dataset.action;
       if (action === 'toggle-panel') {
-        collapsed = !collapsed;
-        applyCollapsedState();
         return;
       }
 
@@ -166,6 +166,8 @@ if (!commitHash) {
     });
 
     applyCollapsedState();
+    bus.subscribe(render);
+    void bus.start();
   });
 </script>
 

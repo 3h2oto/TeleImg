@@ -92,8 +92,10 @@
       tree.innerHTML = `<ul class="folder-tree__root">${renderNode(state, rootNode)}</ul>`;
     };
 
-    bus.subscribe(render);
-    void bus.start();
+    toggleButton?.addEventListener('click', () => {
+      collapsed = !collapsed;
+      applyCollapsedState();
+    });
 
     root.addEventListener('click', async (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -104,8 +106,6 @@
       const path = button.dataset.path;
 
       if (action === 'toggle-panel') {
-        collapsed = !collapsed;
-        applyCollapsedState();
         return;
       }
 
@@ -147,6 +147,8 @@
     });
 
     applyCollapsedState();
+    bus.subscribe(render);
+    void bus.start();
   });
 </script>
 
