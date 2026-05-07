@@ -146,11 +146,15 @@
 <style>
   .admin-pane--left {
     width: 320px;
+    flex: 0 0 320px;
+    max-width: 320px;
     transition: width 0.28s ease;
   }
 
   .admin-pane--left.is-collapsed {
     width: 68px;
+    flex-basis: 68px;
+    max-width: 68px;
   }
 
   .admin-pane--left .admin-pane__content {
